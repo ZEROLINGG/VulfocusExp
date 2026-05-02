@@ -59,7 +59,117 @@ def run_cmd(command: str, timeout: int = 120) -> CommandResult:
         )
 
     except Exception as e:
-        return CommandResult(ok=False, output="", error=f"Exception: {str(e)}")
+        return CommandResult(
+            ok=False, output="", error=f"[run_cmd] Exception: {str(e)}"
+        )
+
+
+class RunCmd:
+    def __init__(self, command: str, timeout: int = 300):
+        self.command = command
+        self.timeout = timeout
+        self.process = None
+        self._result = None
+
+    def run(self) -> tuple[bool, str]:
+        """
+        启动命令执行（非阻塞）
+        返回: (是否成功启动, 消息)
+        """
+        import subprocess
+
+        try:
+            self.process = subprocess.Popen(
+                self.command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            return (True, f"[RunCmd] 命令已启动，PID: {self.process.pid}")
+        except Exception as e:
+            return (False, f"[RunCmd] 启动失败: {str(e)}")
+
+    def join(self) -> CommandResult:
+        """
+        等待命令执行完成并返回结果
+        """
+        import subprocess
+
+        if self.process is None:
+            return CommandResult(ok=False, output="", error="[RunCmd] 进程未启动")
+
+        if self._result is not None:
+            return self._result
+
+        try:
+            stdout, stderr = self.process.communicate(timeout=self.timeout)
+
+            self._result = CommandResult(
+                ok=(self.process.returncode == 0),
+                output=stdout.strip(),
+                error=stderr.strip(),
+            )
+            return self._result
+
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.communicate()  # 清理
+            self._result = CommandResult(
+                ok=False,
+                output="",
+                error=f"[RunCmd] 命令执行超时 ({self.timeout}s)",
+            )
+            return self._result
+        except Exception as e:
+            self._result = CommandResult(
+                ok=False,
+                output="",
+                error=f"[RunCmd] Exception: {str(e)}",
+            )
+            return self._result
+
+    def stop(self) -> CommandResult:
+        """
+        强制停止命令执行
+        """
+        import subprocess
+
+        if self.process is None:
+            return CommandResult(ok=False, output="", error="[RunCmd] 进程未启动")
+
+        try:
+            if self.process.poll() is not None:
+                if self._result:
+                    return self._result
+                return CommandResult(
+                    ok=False,
+                    output="",
+                    error="[RunCmd] 进程已结束",
+                )
+
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+
+            stdout, stderr = self.process.communicate()
+
+            self._result = CommandResult(
+                ok=False,
+                output=stdout.strip() if stdout else "",
+                error=f"[RunCmd] 进程已被停止\n{stderr.strip() if stderr else ''}",
+            )
+            return self._result
+
+        except Exception as e:
+            return CommandResult(
+                ok=False,
+                output="",
+                error=f"[RunCmd] 停止失败: {str(e)}",
+            )
 
 
 @dataclass
