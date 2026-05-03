@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .port_scan import Service
+
 _FLAG_PATTERN = re.compile(r"flag-\{[a-zA-Z0-9_-]+\}", re.IGNORECASE)
 
 
@@ -10,6 +12,12 @@ def match_flag(text: str) -> str | None:
         return None
     match = _FLAG_PATTERN.search(text)
     return match.group(0) if match else None
+
+
+def match_flags(text: str) -> list[str]:
+    if not text:
+        return []
+    return _FLAG_PATTERN.findall(text)
 
 
 def get_local_ip() -> str | None:
@@ -180,8 +188,6 @@ class TargetGroup:
     error: str = ""
 
     def build_urls(self):
-        from .port_scan import Service
-
         results = self.detect_services()
 
         http_ports = [p for p, s in results if s == Service.HTTP]
@@ -194,6 +200,19 @@ class TargetGroup:
             urls.append(f"http://{self.ip}:{p}")
 
         return urls
+
+    def ip_port_with(
+        self, types: list[Service] = [Service.HTTP, Service.HTTPS]
+    ) -> list[tuple[str, int]]:
+        """
+        返回 (ip, port) 元组列表
+        """
+        ports = []
+        results = self.detect_services()
+        for type in types:
+            ports += [p for p, s in results if s == type]
+
+        return [(self.ip, p) for p in ports]
 
     def ip_port(self) -> list[tuple[str, int]]:
         """
@@ -235,7 +254,7 @@ def parse_ip_port(ip_port: str) -> TargetGroup:
 
 def process(
     ip_port: str,
-    run: Callable[[Any], tuple[bool, str, str]],
+    run: Callable[[Any], tuple[bool, str | list[str], str]],
     on_process: Callable[[str], Any] | None = None,
 ):
     targets = []
