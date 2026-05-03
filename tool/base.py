@@ -283,7 +283,7 @@ def process(
 
 # 使用示例
 if __name__ == "__main__":
-    ip_port = "192.168.192.148:18790,45334,49914"
+    ip_port = "192.168.192.148:50979,8226"
     print(ip_port)
     target = parse_ip_port(ip_port)
 
