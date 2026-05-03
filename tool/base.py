@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 from .port_scan import Service
 
-_FLAG_PATTERN = re.compile(r"flag-\{[a-zA-Z0-9_-]+\}", re.IGNORECASE)
+_FLAG_PATTERN = re.compile(r"flag-?\{[a-zA-Z0-9_-]+\}", re.IGNORECASE)
 
 
 def match_flag(text: str) -> str | None:
