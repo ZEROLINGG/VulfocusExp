@@ -170,13 +170,13 @@ async def passive_banner_probe(
         )
 
         service_type = match_service(data)
-        return (True, service_type)
+        return True, service_type
 
     except asyncio.TimeoutError:
         # 超时但连接成功
-        return (True, None)
+        return True, None
     except Exception:
-        return (False, None)
+        return False, None
     finally:
         if sock:
             try:
@@ -246,7 +246,7 @@ async def active_probe(
                     for task in tasks:
                         if not task.done():
                             task.cancel()
-                    return (True, result)
+                    return True, result
             except Exception:
                 pass
 
@@ -257,10 +257,10 @@ async def active_probe(
                 connected = True
                 break
 
-        return (connected, None)
+        return connected, None
     except asyncio.TimeoutError:
         # 所有任务超时
-        return (False, None)
+        return False, None
     finally:
         # 确保所有任务都被取消并清理
         for task in tasks:
@@ -376,8 +376,7 @@ async def detect_services_async(
 
     async def probe_with_limit(port: int) -> tuple[int, Service]:
         async with semaphore:
-            service = await probe_service(ip, port, timeout)
-            return (port, service)
+            return port, await probe_service(ip, port, timeout)
 
     # 并发探测所有端口
     tasks = [probe_with_limit(port) for port in valid_ports]
@@ -386,8 +385,12 @@ async def detect_services_async(
     # 处理结果
     valid_results: list[tuple[int, Service]] = []
     for i, result in enumerate(results):
-        if isinstance(result, tuple):
-            valid_results.append(result)
+        if isinstance(result, tuple) and len(result) == 2:
+            port, service = result
+            if isinstance(port, int) and isinstance(service, Service):
+                valid_results.append((port, service))
+            else:
+                valid_results.append((valid_ports[i], Service.NONE))
         else:
             valid_results.append((valid_ports[i], Service.NONE))
 
@@ -408,3 +411,7 @@ def detect_services_fast(
         [(端口, 服务类型), ...]
     """
     return asyncio.run(detect_services_async(target, timeout))
+
+
+if __name__ == "__main__":
+    print(detect_services_fast(("127.0.0.1", 8080)))
