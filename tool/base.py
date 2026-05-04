@@ -281,9 +281,23 @@ def process(
             print(f"[!] 异常: {target} -> {str(e)}")
 
 
+def process_with(
+    ip_port: str,
+    run: Callable[[tuple[str, int]], tuple[bool, str | list[str], str]],
+    types: list[Service] = [Service.HTTP, Service.HTTPS],
+):
+    def on_process(ip_port: str):
+        tg = parse_ip_port(ip_port)
+        if not tg.ok:
+            return []
+        return tg.ip_port_with(types)
+
+    return process(ip_port, run, on_process)
+
+
 # 使用示例
 if __name__ == "__main__":
-    ip_port = "192.168.192.148:50212"
+    ip_port = "192.168.192.148:30652,35174,62007"
     print(ip_port)
     target = parse_ip_port(ip_port)
 
