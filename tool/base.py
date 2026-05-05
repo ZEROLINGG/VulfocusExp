@@ -7,7 +7,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .port_scan import Service
+from tool.port_scan import Service
 
 _FLAG_PATTERN = re.compile(r"flag-?\{[a-zA-Z0-9_-]+}", re.IGNORECASE)
 
@@ -279,7 +279,7 @@ class TargetGroup:
         return [(self.ip, p) for p in self.ports]
 
     def detect_services(self, timeout: int = 3) -> list[tuple[int, Service]]:
-        from .port_scan import detect_services_fast
+        from tool.port_scan import detect_services_fast
 
         return detect_services_fast((self.ip, self.ports), timeout)
 
@@ -353,4 +353,12 @@ def process_with(
 
 # 使用示例
 if __name__ == "__main__":
-    print(get_local_ip())
+    ip_port = "192.168.192.148:56832,25968,41569,13223"
+    print(ip_port)
+    target = parse_ip_port(ip_port)
+
+    if target.ok:
+        print("=== 基本服务检测 ===")
+        services = target.detect_services()
+        for port, service_type in services:
+            print(f"端口 {port}: {service_type.value}")
