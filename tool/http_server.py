@@ -154,16 +154,19 @@ if __name__ == "__main__":
     def handle_body(body):
         print(body.decode())
 
-    # 启用日志打印
     http = HttpEcho(handle_body, verbose=True)
     http.start()
     run_cmd("curl http://0.0.0.0:8000 -d 'HttpEcho with logs'")
-    # run_cmd("sleep 333")
     http.stop()
 
-    # 启用日志打印
     http = HttpFile({"abc.txt": b"HttpFile"}, verbose=True)
     http.start()
     cr = run_cmd("curl http://0.0.0.0:8001/abc.txt -o /tmp/abc.txt;cat /tmp/abc.txt")
     print(cr.output)
     http.stop()
+
+    http = HttpEcho(handle_body, port=80,verbose=True)
+    http.start()
+    input(">")
+    http.stop()
+
