@@ -9,6 +9,7 @@ from typing import Any, Callable
 import os
 
 from tool.port_scan import Service
+from tool.local_ip import get_ip
 
 _FLAG_PATTERN = re.compile(r"flag-?\{[a-zA-Z0-9_-]+}", re.IGNORECASE)
 
@@ -50,21 +51,8 @@ def match_flags(text: str) -> list[str]:
 
 
 def get_local_ip() -> str | None:
-    """获取当前主机对外通信使用的 IP 地址（出口 IP）。"""
-    s: socket.socket | None = None
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        assert (isinstance(s, socket.socket))
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        debug_log(f"获取到本地 IP: {ip}", "get_local_ip")
-        return ip
-    except Exception as e:
-        debug_log(f"获取本地 IP 失败: {e}", "get_local_ip")
-        return None
-    finally:
-        if s:
-            s.close()
+    """获取当前主机对外通信使用的 IP 地址"""
+    return get_ip()
 
 
 @dataclass
