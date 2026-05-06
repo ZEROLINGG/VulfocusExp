@@ -353,12 +353,12 @@ def process_with(
 
 # 使用示例
 if __name__ == "__main__":
-    ip_port = "192.168.192.148:56832,25968,41569,13223"
-    print(ip_port)
-    target = parse_ip_port(ip_port)
+    _ip_port = "192.168.192.148:19539,11817"
+    print(_ip_port)
+    _target = parse_ip_port(_ip_port)
 
-    if target.ok:
+    if _target.ok:
         print("=== 基本服务检测 ===")
-        services = target.detect_services()
+        services = _target.detect_services()
         for port, service_type in services:
             print(f"端口 {port}: {service_type.value}")

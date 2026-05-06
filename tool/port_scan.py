@@ -25,7 +25,6 @@ class Service(Enum):
     MONGODB = "mongodb"
     POSTGRESQL = "postgresql"
     ELASTICSEARCH = "elasticsearch"
-    TCP = "tcp"  # 通用TCP服务
     UNKNOWN = "unknown"  # 端口开放但无法识别
     NONE = "none"  # 端口未开放/无响应
 
@@ -412,6 +411,3 @@ def detect_services_fast(
     """
     return asyncio.run(detect_services_async(target, timeout))
 
-
-if __name__ == "__main__":
-    print(detect_services_fast(("127.0.0.1", 8080)))

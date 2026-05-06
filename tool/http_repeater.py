@@ -2,6 +2,7 @@ import gzip
 import socket
 import ssl
 import zlib
+import brotli
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union, List
 
@@ -29,25 +30,76 @@ class RawResponse:
         except Exception:
             return ""
 
-    def build_cookie(self) -> Optional[str]:
+    def headers(self) -> Dict[str, List[str]]:
+        """
+        返回解析后的响应头字典。
+        key 已统一小写，值为列表（多值头如 set-cookie 长度 >= 1）。
+        响应不合法或解析失败时返回空字典。
+        """
+        if not self.resp:
+            return {}
+        parsed, _ = _parse_headers(self.resp)
+        return parsed
+
+    def body(self) -> bytes:
+        """
+        返回原始响应体字节。
+        已由 send_raw_request 完成 chunked 解码与 Content-Encoding 解压，
+        此处只做 header/body 分割。
+        """
+        if not self.resp:
+            return b""
+        _, body_part = _parse_headers(self.resp)
+        return body_part
+
+    def body_text(self, encoding: str = "utf-8", errors: str = "replace") -> str:
+        """
+        返回解码后的响应体字符串。
+        encoding 默认 utf-8；若响应头中 Content-Type 携带 charset，
+        可手动传入对应编码。
+        """
+        return self.body().decode(encoding, errors=errors)
+
+    def build_cookie(self, old_cookie: str = "") -> Optional[str]:
         """
         从响应的 Set-Cookie 头构造 Cookie 请求头字符串。
+        若提供 old_cookie，则以其为基础合并新 cookie，新值覆盖同名旧值。
 
         返回格式：`name1=value1;name2=value2`
-        若响应中不含 Set-Cookie 头则返回 None。
+        若响应中不含 Set-Cookie 头且 old_cookie 为空则返回 None。
         """
-        headers, _ = _parse_headers(self.resp)
-        set_cookies: List[str] = headers.get("set-cookie", [])
-        if not set_cookies:
+        set_cookies: List[str] = self.headers().get("set-cookie", [])
+
+        # 解析 old_cookie 为有序字典
+        merged: Dict[str, str] = {}
+        if old_cookie:
+            for pair in old_cookie.split(";"):
+                pair = pair.strip()
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    merged[k.strip()] = v.strip()
+                elif pair:
+                    merged[pair] = ""
+
+        if not set_cookies and not merged:
             return None
 
-        pairs: List[str] = []
+        # 用新 Set-Cookie 覆盖同名旧值
         for cookie in set_cookies:
             name_value = cookie.split(";", 1)[0].strip()
-            if name_value:
-                pairs.append(name_value)
+            if "=" in name_value:
+                k, v = name_value.split("=", 1)
+                merged[k.strip()] = v.strip()
+            elif name_value:
+                merged[name_value] = ""
 
-        return ";".join(pairs) if pairs else None
+        if not merged:
+            return None
+
+        return ";".join(
+            f"{k}={v}" if v else k
+            for k, v in merged.items()
+        )
 
 
 def _extract_host_and_port(raw: bytes) -> Optional[Tuple[str, Optional[int]]]:
@@ -190,7 +242,10 @@ def _decode_content_encoding(body: bytes, content_encoding: str) -> Tuple[bytes,
                 return body, f"deflate decompress failed: {e}"
 
     if encoding == "br":
-        return body, "brotli encoding not supported: install 'brotli' package"
+        try:
+            return brotli.decompress(body), ""
+        except Exception as e:
+            return body, f"brotli decompress failed: {e}"
 
     return body, f"Unknown Content-Encoding '{encoding}', returned raw body"
 
