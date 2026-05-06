@@ -6,34 +6,62 @@ import subprocess
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable
+import os
 
 from tool.port_scan import Service
 
 _FLAG_PATTERN = re.compile(r"flag-?\{[a-zA-Z0-9_-]+}", re.IGNORECASE)
 
+module_name = os.path.splitext(os.path.basename(__file__))[0]
+
+
+def set_debug():
+    os.environ["EXP_DEBUG"] = "true"
+
+
+def debug_log(msg: str, tag: str = "") -> None:
+    """
+    注意tag为函数名或类名.函数名，如：match_flag，get_local_ip，RunCmd.run，TargetGroup.detect_services
+    """
+    if os.environ.get("EXP_DEBUG", "false") == "true":
+        log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
+        print(log)
+
 
 def match_flag(text: str) -> str | None:
+    debug_log(f"输入文本: {text[:100] if text else 'None'}...", "match_flag")
     if not text:
+        debug_log("文本为空，返回 None", "match_flag")
         return None
     match = _FLAG_PATTERN.search(text)
-    return match.group(0) if match else None
+    result = match.group(0) if match else None
+    debug_log(f"匹配结果: {result}", "match_flag")
+    return result
 
 
 def match_flags(text: str) -> list[str]:
+    debug_log(f"输入文本: {text[:100] if text else 'None'}...", "match_flags")
     if not text:
+        debug_log("文本为空，返回空列表", "match_flags")
         return []
-    return _FLAG_PATTERN.findall(text)
+    results = _FLAG_PATTERN.findall(text)
+    debug_log(f"匹配到 {len(results)} 个 flag", "match_flags")
+    return results
 
 
 def get_local_ip() -> str | None:
     """获取当前主机对外通信使用的 IP 地址（出口 IP）。"""
+    debug_log("开始获取本地 IP", "get_local_ip")
     s: socket.socket | None = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        assert(isinstance(s, socket.socket))
+        assert (isinstance(s, socket.socket))
         s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except Exception:
+        ip = s.getsockname()[0]
+        debug_log(f"获取到本地 IP: {ip}", "get_local_ip")
+        return ip
+    except Exception as e:
+        debug_log(f"获取本地 IP 失败: {e}", "get_local_ip")
         return None
     finally:
         if s:
@@ -48,6 +76,7 @@ class CommandResult:
 
 
 def run_cmd(command: str, timeout: int = 120) -> CommandResult:
+    debug_log(f"执行命令: {command}, timeout={timeout}", "run_cmd")
     try:
         result = subprocess.run(  # noqa: S603
             command,
@@ -57,12 +86,15 @@ def run_cmd(command: str, timeout: int = 120) -> CommandResult:
             text=True,
             timeout=timeout,
         )
-        return CommandResult(
+        cmd_result = CommandResult(
             ok=(result.returncode == 0),
             output=result.stdout.strip(),
             error=result.stderr.strip(),
         )
+        debug_log(f"命令执行完成: ok={cmd_result.ok}, returncode={result.returncode}", "run_cmd")
+        return cmd_result
     except Exception as e:
+        debug_log(f"命令执行异常: {e}", "run_cmd")
         return CommandResult(ok=False, output="", error=f"[run_cmd] Exception: {e}")
 
 
@@ -92,14 +124,18 @@ class RunCmd:
         self._result: CommandResult | None = None
         self._lock = threading.Lock()
 
+        debug_log(f"初始化 RunCmd: command={command}, timeout={timeout}", "RunCmd.__init__")
+
     # ------------------------------------------------------------------
     # 公开接口
     # ------------------------------------------------------------------
 
     def run(self) -> tuple[bool, str]:
         """启动命令（非阻塞）。返回 (是否成功启动, 消息)。"""
+        debug_log(f"尝试启动命令: {self.command}", "RunCmd.run")
         with self._lock:
             if self._process is not None:
+                debug_log("进程已在运行", "RunCmd.run")
                 return False, "[RunCmd] 已有进程在运行，请先 stop() 或等待完成"
             try:
                 self._process = subprocess.Popen(  # noqa: S603
@@ -109,28 +145,36 @@ class RunCmd:
                     stderr=subprocess.PIPE,
                     text=True,
                 )
-                assert(isinstance(self._process, subprocess.Popen))
+                assert (isinstance(self._process, subprocess.Popen))
+                debug_log(f"命令启动成功，PID: {self._process.pid}", "RunCmd.run")
                 return True, f"[RunCmd] 命令已启动，PID: {self._process.pid}"
             except Exception as e:
+                debug_log(f"命令启动失败: {e}", "RunCmd.run")
                 return False, f"[RunCmd] 启动失败: {e}"
 
     def join(self) -> CommandResult:
         """阻塞等待命令完成，返回结果。可安全多次调用。"""
+        debug_log("join() 开始等待命令完成", "RunCmd.join")
         with self._lock:
             if self._process is None:
+                debug_log("进程未启动", "RunCmd.join")
                 return CommandResult(ok=False, output="", error="[RunCmd] 进程未启动")
             if self._result is not None:
+                debug_log("返回已缓存的结果", "RunCmd.join")
                 return self._result
             proc = self._process
 
         try:
+            debug_log(f"等待进程完成，timeout={self.timeout}", "RunCmd.join")
             stdout, stderr = proc.communicate(timeout=self.timeout)
             self._result = CommandResult(
                 ok=(proc.returncode == 0),
                 output=stdout.strip(),
                 error=stderr.strip(),
             )
+            debug_log(f"进程完成: returncode={proc.returncode}", "RunCmd.join")
         except subprocess.TimeoutExpired:
+            debug_log(f"进程超时 ({self.timeout}s)，开始终止", "RunCmd.join")
             self._kill_and_drain(proc)
             self._result = CommandResult(
                 ok=False,
@@ -138,12 +182,13 @@ class RunCmd:
                 error=f"[RunCmd] 命令执行超时 ({self.timeout}s)",
             )
         except Exception as e:
+            debug_log(f"join() 异常: {e}", "RunCmd.join")
             self._result = CommandResult(
                 ok=False,
                 output="",
                 error=f"[RunCmd] Exception: {e}",
             )
-        assert(isinstance(self._result, CommandResult))
+        assert (isinstance(self._result, CommandResult))
         return self._result
 
     def stop(self) -> CommandResult:
@@ -155,35 +200,43 @@ class RunCmd:
 
         可安全多次调用。
         """
+        debug_log("stop() 开始终止进程", "RunCmd.stop")
         with self._lock:
             if self._process is None:
+                debug_log("进程未启动", "RunCmd.stop")
                 return CommandResult(ok=False, output="", error="[RunCmd] 进程未启动")
             if self._result is not None:
+                debug_log("返回已缓存的结果", "RunCmd.stop")
                 return self._result
             proc = self._process
 
             if proc.poll() is not None:
+                debug_log(f"进程已自然结束，returncode={proc.returncode}", "RunCmd.stop")
                 self._result = self._collect_finished(proc)
                 assert (isinstance(self._result, CommandResult))
                 return self._result
 
         # 进程仍在运行，锁外执行 I/O
+        debug_log("进程仍在运行，开始终止", "RunCmd.stop")
         result = self._terminate_and_collect(proc)
         self._result = result
         return result
 
     def reset(self) -> None:
         """停止当前进程并重置状态，允许重新 run()。"""
+        debug_log("reset() 重置状态", "RunCmd.reset")
         self.stop()
         with self._lock:
             self._process = None
             self._result = None
 
     def __enter__(self) -> RunCmd:
+        debug_log("进入上下文管理器", "RunCmd.__enter__")
         return self
 
     def __exit__(self, *_: object) -> None:
         """离开 with 块时自动终止进程并释放管道资源。"""
+        debug_log("退出上下文管理器", "RunCmd.__exit__")
         self.stop()
 
     @staticmethod
@@ -246,6 +299,7 @@ class TargetGroup:
     error: str = ""
 
     def build_urls(self) -> list[str]:
+        debug_log(f"构建 URLs: ip={self.ip}, ports={self.ports}", "TargetGroup.build_urls")
         results = self.detect_services()
 
         http_ports = [p for p, s in results if s == Service.HTTP]
@@ -256,10 +310,12 @@ class TargetGroup:
             urls.append(f"https://{self.ip}:{p}")
         for p in http_ports:
             urls.append(f"http://{self.ip}:{p}")
+
+        debug_log(f"生成 {len(urls)} 个 URL: {urls}", "TargetGroup.build_urls")
         return urls
 
     def ip_port_with(
-        self, types: list[Service] | None = None
+            self, types: list[Service] | None = None
     ) -> list[tuple[str, int]]:
         """
         返回 (ip, port) 元组列表
@@ -267,21 +323,30 @@ class TargetGroup:
         if types is None:
             types = [Service.HTTP, Service.HTTPS]
         assert types is not None
+
+        debug_log(f"过滤服务类型: {[t.value for t in types]}", "TargetGroup.ip_port_with")
         ports = []
         results = self.detect_services()
         for t in types:
             ports += [p for p, s in results if s == t]
 
-        return [(self.ip, p) for p in ports]
+        result = [(self.ip, p) for p in ports]
+        debug_log(f"返回 {len(result)} 个 ip:port 对", "TargetGroup.ip_port_with")
+        return result
 
     def ip_port(self) -> list[tuple[str, int]]:
         """返回所有端口的 (ip, port) 元组列表，不做服务类型过滤。"""
-        return [(self.ip, p) for p in self.ports]
+        result = [(self.ip, p) for p in self.ports]
+        debug_log(f"返回所有 {len(result)} 个 ip:port 对", "TargetGroup.ip_port")
+        return result
 
     def detect_services(self, timeout: int = 3) -> list[tuple[int, Service]]:
         from tool.port_scan import detect_services_fast
 
-        return detect_services_fast((self.ip, self.ports), timeout)
+        debug_log(f"开始服务检测: ip={self.ip}, ports={self.ports}, timeout={timeout}", "TargetGroup.detect_services")
+        results = detect_services_fast((self.ip, self.ports), timeout)
+        debug_log(f"服务检测完成: {len(results)} 个结果", "TargetGroup.detect_services")
+        return results
 
 
 def parse_ip_port(ip_port: str) -> TargetGroup:
@@ -289,6 +354,7 @@ def parse_ip_port(ip_port: str) -> TargetGroup:
     解析输入格式: "ip:port1,port2,..."
     返回: TargetGroup
     """
+    debug_log(f"解析输入: {ip_port}", "parse_ip_port")
     try:
         ip, ports_str = ip_port.strip().split(":", 1)
 
@@ -301,21 +367,26 @@ def parse_ip_port(ip_port: str) -> TargetGroup:
 
         if not ip or not ports:
             raise ValueError
+
+        debug_log(f"解析成功: ip={ip}, ports={ports}", "parse_ip_port")
         return TargetGroup(ip=ip, ports=ports)
-    except ValueError:
+    except ValueError as e:
+        debug_log(f"解析失败: {e}", "parse_ip_port")
         return TargetGroup(
             ip="", ports=[], ok=False, error="输入格式错误，应为: ip:port1,port2,..."
         )
 
 
 def process(
-    ip_port: str,
-    run: Callable[[Any], tuple[bool, str | list[str], str]],
-    on_process: Callable[[str], list[Any]] | None = None,
+        ip_port: str,
+        run: Callable[[Any], tuple[bool, str | list[str], str]],
+        on_process: Callable[[str], list[Any]] | None = None,
 ) -> None:
+    debug_log(f"开始处理: {ip_port}", "process")
     targets: list[Any] = []
     try:
         if on_process:
+            debug_log("使用自定义 on_process", "process")
             targets = on_process(ip_port)
         else:
             tg = parse_ip_port(ip_port)
@@ -323,10 +394,14 @@ def process(
                 print(tg.error)
                 return
             targets = tg.build_urls()
+
+        debug_log(f"获得 {len(targets)} 个目标", "process")
     except Exception as e:
+        debug_log(f"处理异常: {e}", "process")
         print(f"[!] 异常: {e}")
 
-    for target in targets:
+    for idx, target in enumerate(targets):
+        debug_log(f"处理目标 [{idx + 1}/{len(targets)}]: {target}", "process")
         try:
             ok, result, err = run(target)
             if ok:
@@ -334,14 +409,17 @@ def process(
             else:
                 print(f"[-] 失败: {target} -> {err}")
         except Exception as e:
+            debug_log(f"运行异常: {e}", "process")
             print(f"[!] 异常: {target} -> {e}")
 
 
 def process_with(
-    ip_port: str,
-    run: Callable[[tuple[str, int]], tuple[bool, str | list[str], str]],
-    types: list[Service] | None = None,
+        ip_port: str,
+        run: Callable[[tuple[str, int]], tuple[bool, str | list[str], str]],
+        types: list[Service] | None = None,
 ) -> None:
+    debug_log(f"开始 process_with: {ip_port}, types={types if types is not None else "[Service.HTTP, Service.HTTPS]"}", "process_with")
+
     def on_process(addr: str) -> list[tuple[str, int]]:
         tg = parse_ip_port(addr)
         if not tg.ok:

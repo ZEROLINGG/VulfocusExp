@@ -170,5 +170,5 @@ if __name__ == "__main__":
 
 ## 注意事项
 - 尽量使用curl，wget的post请求带出数据，在缺少curl,wget工具时使用f'$(bash -c "test "$(ls /tmp | grep flag- | head -c{pos} | tail -c1)" = "{c}" && sleep 2")'。尽量避免反弹shell。
-- 验证poc/exp可行后需要完成与该项目兼容且符合结构的[题目名].py 并进行测试。
+- 验证poc/exp可行后需要完成与该项目兼容且符合结构的[题目名].py 并进行测试，直到exp完善。
 - 
