@@ -11,9 +11,6 @@ module_name = os.path.splitext(os.path.basename(__file__))[0]
 
 
 def debug_log(msg: str, tag: str = "") -> None:
-    """
-    注意tag为函数名或类名.函数名，如：match_flag，get_local_ip，RunCmd.run，TargetGroup.detect_services
-    """
     if os.environ.get("EXP_DEBUG", "false") == "true":
         log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
         print(log)
@@ -133,7 +130,6 @@ class RawResponse:
 
 
 def _extract_host_and_port(raw: bytes) -> Optional[Tuple[str, Optional[int]]]:
-    debug_log("开始从请求中提取 Host 和端口", "_extract_host_and_port")
     try:
         lower = raw.lower()
         key = b"\r\nhost:"
@@ -148,7 +144,6 @@ def _extract_host_and_port(raw: bytes) -> Optional[Tuple[str, Optional[int]]]:
             end = len(raw)
 
         host_value = raw[start:end].strip().decode()
-        debug_log(f"提取到 Host 值: {host_value}", "_extract_host_and_port")
 
         if host_value.startswith("["):
             bracket_end = host_value.find("]")
@@ -365,12 +360,11 @@ def send_raw_request(
             elif not host:
                 host = host_port[0]
 
-        debug_log(f"连接目标: {host}:{port}", "send_raw_request")
         try:
             sock = socket.create_connection((host, port), timeout=timeout)
-            debug_log(f"连接成功", "send_raw_request")
+            debug_log(f"连接目标: {host}:{port} 成功", "send_raw_request")
         except socket.timeout:
-            debug_log(f"连接超时", "send_raw_request")
+            debug_log(f"连接目标: {host}:{port} 超时", "send_raw_request")
             return RawResponse(
                 ok=False, error=f"Connection timeout to {host}:{port}", resp=b""
             )
@@ -415,7 +409,6 @@ def send_raw_request(
             debug_log(f"发送请求，大小: {len(raw_request)} 字节", "send_raw_request")
             debug_log(f"发送请求，内容: {raw_request}", "send_raw_request")
             conn.sendall(raw_request)
-            debug_log("请求发送完成", "send_raw_request")
         except socket.timeout:
             debug_log("发送超时", "send_raw_request")
             return RawResponse(ok=False, error="Send timeout", resp=b"")
@@ -584,7 +577,7 @@ def send_raw_request(
             response_data = header_data + decompressed
 
         debug_log(f"请求成功，最终响应大小: {len(response_data)} 字节", "send_raw_request")
-        debug_log(f"请求成功，最终响应内容: {response_data}", "send_raw_request")
+        debug_log(f"请求成功，最终响应内容: {response_data[:400]}...", "send_raw_request")
         return RawResponse(ok=True, error="", resp=response_data)
 
     except Exception as e:
@@ -699,7 +692,6 @@ def repeater(
               "repeater")
 
     if isinstance(raw_request, str):
-        debug_log("转换字符串请求为字节", "repeater")
         raw_request = raw_request.replace("\r\n", "\n").replace("\r", "\n")
         assert isinstance(raw_request, str)
         raw_request = raw_request.replace("\n", "\r\n").encode("utf-8")
@@ -709,14 +701,13 @@ def repeater(
     assert isinstance(headers, dict)
     if headers.get("Connection") is None:
         headers["Connection"] = "close"
-        debug_log("添加默认 Connection: close", "repeater")
+        debug_log("添加默认头 Connection: close", "repeater")
 
     assert isinstance(raw_request, bytes)
     raw_request = _insert_headers(raw_request, headers)
 
     assert isinstance(raw_request, bytes)
     if fix_content_length:
-        debug_log("修正 Content-Length", "repeater")
         raw_request = _fix_content_length(raw_request)
 
     assert isinstance(raw_request, bytes)

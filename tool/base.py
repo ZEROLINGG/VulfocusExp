@@ -51,7 +51,6 @@ def match_flags(text: str) -> list[str]:
 
 def get_local_ip() -> str | None:
     """获取当前主机对外通信使用的 IP 地址（出口 IP）。"""
-    debug_log("开始获取本地 IP", "get_local_ip")
     s: socket.socket | None = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -299,7 +298,6 @@ class TargetGroup:
     error: str = ""
 
     def build_urls(self) -> list[str]:
-        debug_log(f"构建 URLs: ip={self.ip}, ports={self.ports}", "TargetGroup.build_urls")
         results = self.detect_services()
 
         http_ports = [p for p, s in results if s == Service.HTTP]
@@ -311,7 +309,6 @@ class TargetGroup:
         for p in http_ports:
             urls.append(f"http://{self.ip}:{p}")
 
-        debug_log(f"生成 {len(urls)} 个 URL: {urls}", "TargetGroup.build_urls")
         return urls
 
     def ip_port_with(
@@ -324,28 +321,23 @@ class TargetGroup:
             types = [Service.HTTP, Service.HTTPS]
         assert types is not None
 
-        debug_log(f"过滤服务类型: {[t.value for t in types]}", "TargetGroup.ip_port_with")
         ports = []
         results = self.detect_services()
         for t in types:
             ports += [p for p, s in results if s == t]
 
         result = [(self.ip, p) for p in ports]
-        debug_log(f"返回 {len(result)} 个 ip:port 对", "TargetGroup.ip_port_with")
         return result
 
     def ip_port(self) -> list[tuple[str, int]]:
         """返回所有端口的 (ip, port) 元组列表，不做服务类型过滤。"""
         result = [(self.ip, p) for p in self.ports]
-        debug_log(f"返回所有 {len(result)} 个 ip:port 对", "TargetGroup.ip_port")
         return result
 
     def detect_services(self, timeout: int = 3) -> list[tuple[int, Service]]:
         from tool.port_scan import detect_services_fast
 
-        debug_log(f"开始服务检测: ip={self.ip}, ports={self.ports}, timeout={timeout}", "TargetGroup.detect_services")
         results = detect_services_fast((self.ip, self.ports), timeout)
-        debug_log(f"服务检测完成: {len(results)} 个结果", "TargetGroup.detect_services")
         return results
 
 
@@ -368,7 +360,6 @@ def parse_ip_port(ip_port: str) -> TargetGroup:
         if not ip or not ports:
             raise ValueError
 
-        debug_log(f"解析成功: ip={ip}, ports={ports}", "parse_ip_port")
         return TargetGroup(ip=ip, ports=ports)
     except ValueError as e:
         debug_log(f"解析失败: {e}", "parse_ip_port")
@@ -382,7 +373,6 @@ def process(
         run: Callable[[Any], tuple[bool, str | list[str], str]],
         on_process: Callable[[str], list[Any]] | None = None,
 ) -> None:
-    debug_log(f"开始处理: {ip_port}", "process")
     targets: list[Any] = []
     try:
         if on_process:
@@ -395,7 +385,7 @@ def process(
                 return
             targets = tg.build_urls()
 
-        debug_log(f"获得 {len(targets)} 个目标", "process")
+        debug_log(f"获得 {len(targets)} 个目标: {targets}", "process")
     except Exception as e:
         debug_log(f"处理异常: {e}", "process")
         print(f"[!] 异常: {e}")
