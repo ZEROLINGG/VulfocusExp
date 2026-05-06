@@ -1,6 +1,8 @@
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import os
+import os,time
+from dataclasses import dataclass
+from pathlib import Path
 
 module_name = os.path.splitext(os.path.basename(__file__))[0]
 
@@ -9,6 +11,27 @@ def debug_log(msg: str, tag: str = "") -> None:
     if os.environ.get("EXP_DEBUG", "false") == "true":
         log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
         print(log)
+
+@dataclass
+class EchoRequest:
+    ip: str
+    method: str
+    path: str
+    headers: dict[str, str]
+    body: bytes
+    timestamp: float
+
+    def __str__(self) -> str:
+        headers_str = "\n".join(f"        {k}: {v}" for k, v in self.headers.items())
+        body_repr = self.body.decode(errors="replace") if self.body else ""
+
+        return (
+            f"{self.method} {self.path}\n"
+            f"    from: {self.ip}\n"
+            f"    time: {self.timestamp:.3f}\n"
+            f"    headers:\n{headers_str if headers_str else '        (none)'}\n"
+            f"    body:\n        {body_repr if body_repr else '(empty)'}"
+        )
 
 
 class _BaseHttpServer:
@@ -55,39 +78,73 @@ class _BaseHttpServer:
 
 
 class HttpEcho(_BaseHttpServer):
-    def __init__(self, on_body=None, port=8000):
+    def __init__(self, port=8000):
         super().__init__(port)
-        self.on_body = on_body or (lambda body: None)
+        self._requests: list[EchoRequest] = []
+        self._lock = threading.Lock()
 
     def _make_handler(self):
-        on_body = self.on_body
+        store = self._requests
+        lock = self._lock
 
         class CustomHandler(BaseHTTPRequestHandler):
-            def do_POST(self):
+            def _handle(self):
                 content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length)
+                body = self.rfile.read(content_length) if content_length else b""
+                ip = self.client_address[0]
+                method = self.command
+                path = self.path
+                headers = dict(self.headers)
+                #
+                # debug_log(
+                #     f"收到 {method} 请求: path={path}, body_length={content_length}",
+                #     f"HttpEcho.{method}",
+                # )
 
-                debug_log(f"收到 POST 请求: path={self.path}, body_length={content_length}, body={body}", "HttpEcho.do_POST")
-
-                try:
-                    on_body(body)
-                except Exception as e:
-                    debug_log(f"on_body 回调执行失败: {e}", "HttpEcho.do_POST")
-                    print(f"[!] on_body error: {e}")
+                req = EchoRequest(
+                    ip=ip,
+                    method=method,
+                    path=path,
+                    headers=headers,
+                    body=body,
+                    timestamp=time.time(),
+                )
+                debug_log(
+                    str(req),
+                    f"HttpEcho.{method}",
+                )
+                with lock:
+                    store.append(req)
 
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(b"OK")
 
+            def do_GET(self):    self._handle()
+            def do_POST(self):   self._handle()
+            def do_PUT(self):    self._handle()
+            def do_DELETE(self): self._handle()
+            def do_PATCH(self):  self._handle()
+
             def log_message(self, _format, *args):
-                # HTTP 服务器日志通过 debug_log 输出
                 debug_log(f"{_format % args}", "HttpEcho.log")
 
         return CustomHandler
 
+    def requests(self) -> list[EchoRequest]:
+        with self._lock:
+            return list(self._requests)
+
+    def echo(self) -> str:
+        with self._lock:
+            return "\n\n".join(
+                f"[{i}] {req}"
+                for i, req in enumerate(self._requests)
+            )
+
 
 class HttpFile(_BaseHttpServer):
-    def __init__(self, files: dict[str, bytes | str], port=8001):
+    def __init__(self, files: dict[str, bytes | Path], port=8001):
         super().__init__(port)
         self.files = files
 
@@ -109,12 +166,11 @@ class HttpFile(_BaseHttpServer):
                     if isinstance(file_data_or_path, bytes):
                         content = file_data_or_path
                         debug_log(f"从内存读取文件: {filename}, size={len(content)}", "HttpFile.do_GET")
-                    elif isinstance(file_data_or_path, str):
-                        with open(file_data_or_path, "rb") as f:
-                            content = f.read()
+                    elif isinstance(file_data_or_path, Path):
+                        content = file_data_or_path.read_bytes()
                         debug_log(f"从磁盘读取文件: {file_data_or_path}, size={len(content)}", "HttpFile.do_GET")
                     else:
-                        raise TypeError("File data must be bytes or a filepath string.")
+                        raise TypeError("File data must be bytes or a Path.")
                 except FileNotFoundError:
                     debug_log(f"磁盘文件不存在: {file_data_or_path}", "HttpFile.do_GET")
                     self.send_error(404, "File Not Found on Server Disk")
@@ -134,7 +190,6 @@ class HttpFile(_BaseHttpServer):
                 debug_log(f"文件发送成功: {filename}", "HttpFile.do_GET")
 
             def log_message(self, _format, *args):
-                # HTTP 服务器日志通过 debug_log 输出
                 debug_log(f"{_format % args}", "HttpFile.log")
 
         return FileDownloadHandler
@@ -146,14 +201,9 @@ if __name__ == "__main__":
     # 开启调试日志
     set_debug()
 
-
-    def handle_body(body):
-        print(f"[收到数据] {body.decode()}")
-
-
     # with 用法
     print("\n=== 测试 HttpEcho ===")
-    with HttpEcho(handle_body):
+    with HttpEcho():
         run_cmd("curl http://0.0.0.0:8000 -d 'HttpEcho with debug logs'")
     print("\n=== 测试 HttpFile ===")
     with HttpFile({"abc.txt": b"HttpFile content"}):
@@ -174,8 +224,7 @@ if __name__ == "__main__":
     </bean>
     </beans>""".encode()
     files = {"xml.xml": xml}
-    print("\n=== 测试传统用法 ===")
-    http_echo = HttpEcho(handle_body, port=8000)
+    http_echo = HttpEcho(port=8000)
     http_echo.start()
     http_file = HttpFile(files, port=8001)
     http_file.start()

