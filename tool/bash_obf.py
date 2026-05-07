@@ -118,6 +118,7 @@ def _backslash(cmd: str) -> str:
     return ''.join(result)
 
 
+
 def _dollar_brackets(cmd: str) -> str:
     """
     ls /tmp -> echo $(ls /tmp)
