@@ -11,24 +11,17 @@ import os
 
 from tool.port_scan import Service
 from tool.local_ip import get_ip
+from tool.log import debug_log,set_debug as _set_debug,set_no_debug as _set_no_debug
 
 _FLAG_PATTERN = re.compile(r"flag-?\{[a-zA-Z0-9_-]+}", re.IGNORECASE)
 
-module_name = os.path.splitext(os.path.basename(__file__))[0]
+
 
 
 def set_debug():
-    os.environ["EXP_DEBUG"] = "true"
-
-
-def debug_log(msg: str, tag: str = "") -> None:
-    """
-    注意tag为函数名或类名.函数名，如：match_flag，get_local_ip，RunCmd.run，TargetGroup.detect_services
-    """
-    if os.environ.get("EXP_DEBUG", "false") == "true":
-        log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
-        print(log)
-
+    _set_debug()
+def set_no_debug():
+    _set_no_debug()
 
 
 def wait(

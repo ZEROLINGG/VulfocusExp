@@ -58,4 +58,4 @@ def main(ip_port: str):
 
 if __name__ == "__main__":
     __import__("tool.base", fromlist=["set_debug"]).set_debug()
-    main("192.168.192.148:31574")
+    main("192.168.192.148:24235")

@@ -3,12 +3,8 @@ import os
 import random
 from typing import Any
 
-module_name = os.path.splitext(os.path.basename(__file__))[0]
+from tool.log import debug_log
 
-def debug_log(msg: str, tag: str = "") -> None:
-    if os.environ.get("EXP_DEBUG", "false") == "true":
-        log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
-        print(log)
 
 
 
@@ -342,7 +338,7 @@ def apply_obfs(
 
     # 如果没有指定方法
     if not methods:
-        debug_log("no obfuscation methods", "apply_obfs")
+        debug_log("no obfuscation methods")
         return None
 
     for idx, method in enumerate(methods, start=1):
@@ -352,7 +348,7 @@ def apply_obfs(
         if result is None:
             debug_log(
                 f"第 {idx} 层失败: [{method}] cmd:{current_cmd}",
-                "apply_obfs"
+                
             )
 
             return None
@@ -388,13 +384,13 @@ def random_obf(cmd: str, obf: list[str] | None = None, depth: int = 4, args: dic
             result = apply_obf(name, current_cmd, **current_kwargs)
 
             if result:
-                debug_log(f"第 {i + 1} 层: [{name}] -> 参数: {current_kwargs}", "random_obf")
+                debug_log(f"第 {i + 1} 层: [{name}] -> 参数: {current_kwargs}")
                 current_cmd = result
                 success = True
                 break
 
         if not success:
-            debug_log(f"第 {i + 1} 层: 无可用方法，提前结束", "random_obf")
+            debug_log(f"第 {i + 1} 层: 无可用方法，提前结束")
             break
 
     return current_cmd
@@ -438,5 +434,6 @@ def demo():
 
 
 if __name__ == '__main__':
+    # __import__("tool.base", fromlist=["set_debug"]).set_debug()
     demo()
 

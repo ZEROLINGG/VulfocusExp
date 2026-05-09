@@ -7,13 +7,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union, List
 import os
 
-module_name = os.path.splitext(os.path.basename(__file__))[0]
-
-
-def debug_log(msg: str, tag: str = "") -> None:
-    if os.environ.get("EXP_DEBUG", "false") == "true":
-        log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
-        print(log)
+from tool.log import debug_log
 
 
 @dataclass
@@ -691,6 +685,8 @@ def repeater(
     assert isinstance(headers, dict)
     if headers.get("Connection") is None:
         headers["Connection"] = "close"
+    if headers.get("Connection") == "<!none!>":
+        del(headers["Connection"])
 
     assert isinstance(raw_request, bytes)
     raw_request = _insert_headers(raw_request, headers)

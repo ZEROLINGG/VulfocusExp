@@ -4,13 +4,7 @@ import os,time
 from dataclasses import dataclass
 from pathlib import Path
 
-module_name = os.path.splitext(os.path.basename(__file__))[0]
-
-
-def debug_log(msg: str, tag: str = "") -> None:
-    if os.environ.get("EXP_DEBUG", "false") == "true":
-        log = f"[{module_name}][{tag}] {msg}" if tag else f"[{module_name}] {msg}"
-        print(log)
+from tool.log import debug_log
 
 @dataclass
 class EchoRequest:
