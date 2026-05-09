@@ -315,7 +315,7 @@ def get_ip(verbose: bool = False) -> str | None
 
 - 自动排除虚拟接口（Docker、VMWare、WSL 等）
 - 优先选择有线网卡（eth、ens、enp 等）
-- 按网段评分（10.0.0.0/8 > 172.16.0.0/12 > 192.168.0.0/16 > 公网）
+- 按网段评分（公网 > 10.0.0.0/8 > 172.16.0.0/12 > 192.168.0.0/16）
 - 支持 Windows、Linux、macOS
 
 ---
@@ -377,7 +377,6 @@ from tool.bash_obf import apply_obfs, random_obf
 
 # 指定混淆方法
 result = apply_obfs("ls /tmp", obf=["base64", "rev1"])
-# 输出: echo 'lmx/tmp | rev | base64 -d | bash'
 
 # 随机混淆
 result = random_obf("cat /etc/passwd", depth=3)
