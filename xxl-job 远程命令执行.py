@@ -57,6 +57,5 @@ def main(ip_port: str):
 
 
 if __name__ == "__main__":
-    from tool.base import set_debug
-    set_debug()
-    main("192.168.192.148:42609")
+    __import__("tool.base", fromlist=["set_debug"]).set_debug()
+    main("192.168.192.148:31574")

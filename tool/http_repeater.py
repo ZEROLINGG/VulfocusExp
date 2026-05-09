@@ -186,7 +186,6 @@ def _parse_headers(header_bytes: bytes) -> Tuple[Dict[str, List[str]], bytes]:
             单值头列表长度为 1，多值头（如 set-cookie）列表长度 >= 1。
         body_part: bytes
     """
-    debug_log(f"开始解析响应头，数据大小: {len(header_bytes)} 字节", "_parse_headers")
     headers: Dict[str, List[str]] = {}
 
     header_separator = b"\r\n\r\n"
@@ -341,7 +340,6 @@ def send_raw_request(
 
     try:
         if port is None or not host:
-            debug_log("从请求头中提取 Host 和端口", "send_raw_request")
             host_port = _extract_host_and_port(raw_request)
             if not host_port:
                 debug_log("提取 Host 失败", "send_raw_request")
@@ -406,8 +404,7 @@ def send_raw_request(
 
         try:
             conn.settimeout(timeout)
-            debug_log(f"发送请求，大小: {len(raw_request)} 字节", "send_raw_request")
-            debug_log(f"发送请求，内容: {raw_request}", "send_raw_request")
+            debug_log(f"发送请求，大小: {len(raw_request)} 字节, 内容: {raw_request}", "send_raw_request")
             conn.sendall(raw_request)
         except socket.timeout:
             debug_log("发送超时", "send_raw_request")
@@ -419,7 +416,6 @@ def send_raw_request(
         header_buf = bytearray()
         header_separator = b"\r\n\r\n"
 
-        debug_log("开始接收响应头", "send_raw_request")
         try:
             while header_separator not in header_buf:
                 chunk = conn.recv(1024 * 64)
@@ -452,7 +448,6 @@ def send_raw_request(
             sep_idx = header_buf.find(header_separator)
             body_start = header_buf[sep_idx + len(header_separator):]
             header_data = header_buf[: sep_idx + len(header_separator)]
-            debug_log(f"分离头部和 body，body 起始大小: {len(body_start)} 字节", "send_raw_request")
         else:
             header_data = header_buf
 
@@ -536,7 +531,6 @@ def send_raw_request(
                     )
 
         response_data = b"".join(response_parts)
-        debug_log(f"接收完成，总大小: {len(response_data)} 字节", "send_raw_request")
 
         if not response_data:
             debug_log("未接收到响应", "send_raw_request")
@@ -576,8 +570,7 @@ def send_raw_request(
                 )
             response_data = header_data + decompressed
 
-        debug_log(f"请求成功，最终响应大小: {len(response_data)} 字节", "send_raw_request")
-        debug_log(f"请求成功，最终响应内容: {response_data[:1024]}...", "send_raw_request")
+        debug_log(f"请求成功，最终响应大小: {len(response_data)} 字节, 最终响应内容: {response_data[:1024]}...", "send_raw_request")
         return RawResponse(ok=True, error="", resp=response_data)
 
     except Exception as e:
@@ -594,7 +587,6 @@ def send_raw_request(
 
 
 def _fix_content_length(raw: bytes) -> bytes:
-    debug_log(f"修正 Content-Length，请求大小: {len(raw)} 字节", "_fix_content_length")
     separator = b"\r\n\r\n"
     sep_idx = raw.find(separator)
 
@@ -605,7 +597,6 @@ def _fix_content_length(raw: bytes) -> bytes:
     header_part = raw[:sep_idx]
     body_part = raw[sep_idx + len(separator):]
     body_len = len(body_part)
-    debug_log(f"body 大小: {body_len} 字节", "_fix_content_length")
 
     lines = header_part.split(b"\r\n")
     filtered = [
@@ -624,7 +615,6 @@ def _insert_headers(raw_request: bytes, headers: Dict[str, Union[str, bytes]]) -
     """
     向原始 HTTP 请求中插入或覆盖头字段。
     """
-    debug_log(f"插入/覆盖 {len(headers)} 个头字段", "_insert_headers")
     separator = b"\r\n\r\n"
     sep_idx = raw_request.find(separator)
 
@@ -673,7 +663,7 @@ def _insert_headers(raw_request: bytes, headers: Dict[str, Union[str, bytes]]) -
             new_header_lines.append(k_bytes + b": " + v_bytes)
 
     result = b"\r\n".join([request_line] + new_header_lines) + body_part
-    debug_log(f"头字段处理完成，新请求大小: {len(result)} 字节", "_insert_headers")
+    debug_log(f"插入/覆盖 {len(headers)} 个头字段, 内容：{headers}", "_insert_headers")
     return result
 
 
@@ -701,7 +691,6 @@ def repeater(
     assert isinstance(headers, dict)
     if headers.get("Connection") is None:
         headers["Connection"] = "close"
-        debug_log("添加默认头 Connection: close", "repeater")
 
     assert isinstance(raw_request, bytes)
     raw_request = _insert_headers(raw_request, headers)
