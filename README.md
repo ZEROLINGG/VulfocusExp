@@ -28,7 +28,7 @@
 ## 依赖安装
 
 ```bash
-pip install brotli psutil
+uv sync
 ```
 
 ## 核心模块
