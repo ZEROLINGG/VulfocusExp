@@ -1,10 +1,12 @@
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import os,time
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from tool.log import debug_log
+
 
 @dataclass
 class EchoRequest:
@@ -29,55 +31,82 @@ class EchoRequest:
 
 
 class _BaseHttpServer:
-    def __init__(self, port):
+    def __init__(self, port: int = 0):
         self.host = "0.0.0.0"
-        self.port = port
-        self._server = None
-        self._thread = None
+        self._port = port  # 请求端口，0 = 由 OS 自动分配
+        self._bound_port: int | None = None  # start() 后的实际端口
+        self._server: HTTPServer[Any] | None = None
+        self._thread: threading.Thread | None = None
 
-    def _make_handler(self):
+    def port(self) -> int:
+        """
+        返回实际监听端口。
+
+        构造时传入 port=0 时 OS 会自动分配端口，
+        必须在 start() 之后调用才能取到实际值。
+
+        Raises:
+            RuntimeError: 服务器尚未启动。
+        """
+        if self._bound_port is None:
+            raise RuntimeError("服务器尚未启动，请先调用 start()")
+        return self._bound_port
+
+    def _make_handler(self) -> type[Any]:
         raise NotImplementedError
 
-    def start(self):
-        if self._server:
+    def start(self) -> "_BaseHttpServer":
+        if self._server is not None:
             debug_log("服务器已在运行", f"{self.__class__.__name__}.start")
             return self
 
         handler = self._make_handler()
-        self._server = HTTPServer((self.host, self.port), handler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-        debug_log(f"服务器启动成功: {self.host}:{self.port}", f"{self.__class__.__name__}.start")
+        self._server = HTTPServer((self.host, self._port), handler)
+        addr: tuple[str, int] = self._server.server_address  # type: ignore
+        self._bound_port = addr[1]
+
+        thread = threading.Thread(
+            target=self._server.serve_forever, daemon=True, # type: ignore
+            name=f"{self.__class__.__name__}-serve",
+        )
+        thread.start()
+        self._thread = thread
+        debug_log(
+            f"服务器启动成功: {self.host}:{self._bound_port}",
+            f"{self.__class__.__name__}.start",
+        )
         return self
 
     def stop(self):
-        if not self._server:
+        if self._server is None:
             debug_log("服务器未运行", f"{self.__class__.__name__}.stop")
             return
 
         self._server.shutdown()
         self._server.server_close()
-        if self._thread:
+        if self._thread is not None:
             self._thread.join()
+
         self._server = None
         self._thread = None
+        self._bound_port = None
         debug_log("已停止服务器", f"{self.__class__.__name__}.stop")
 
-    def __enter__(self):
+    def __enter__(self) -> "_BaseHttpServer":
         return self.start()
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         self.stop()
         return False
 
 
 class HttpEcho(_BaseHttpServer):
-    def __init__(self, port=8000):
+    def __init__(self, port: int = 8000):
         super().__init__(port)
         self._requests: list[EchoRequest] = []
         self._lock = threading.Lock()
 
-    def _make_handler(self):
+    def _make_handler(self) -> type[BaseHTTPRequestHandler]:
         store = self._requests
         lock = self._lock
 
@@ -85,28 +114,16 @@ class HttpEcho(_BaseHttpServer):
             def _handle(self):
                 content_length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(content_length) if content_length else b""
-                ip = self.client_address[0]
-                method = self.command
-                path = self.path
-                headers = dict(self.headers)
-                #
-                # debug_log(
-                #     f"收到 {method} 请求: path={path}, body_length={content_length}",
-                #     f"HttpEcho.{method}",
-                # )
 
                 req = EchoRequest(
-                    ip=ip,
-                    method=method,
-                    path=path,
-                    headers=headers,
+                    ip=self.client_address[0],
+                    method=self.command,
+                    path=self.path,
+                    headers=dict(self.headers),
                     body=body,
                     timestamp=time.time(),
                 )
-                debug_log(
-                    str(req),
-                    f"HttpEcho.{method}",
-                )
+                debug_log(str(req), f"HttpEcho.{self.command}")
                 with lock:
                     store.append(req)
 
@@ -115,9 +132,13 @@ class HttpEcho(_BaseHttpServer):
                 self.wfile.write(b"OK")
 
             def do_GET(self):    self._handle()
+
             def do_POST(self):   self._handle()
+
             def do_PUT(self):    self._handle()
+
             def do_DELETE(self): self._handle()
+
             def do_PATCH(self):  self._handle()
 
             def log_message(self, _format, *args):
@@ -138,11 +159,11 @@ class HttpEcho(_BaseHttpServer):
 
 
 class HttpFile(_BaseHttpServer):
-    def __init__(self, files: dict[str, bytes | Path], port=8001):
+    def __init__(self, files: dict[str, bytes | Path], port: int = 8001):
         super().__init__(port)
         self.files = files
 
-    def _make_handler(self):
+    def _make_handler(self) -> type[BaseHTTPRequestHandler]:
         files_to_serve = self.files
 
         class FileDownloadHandler(BaseHTTPRequestHandler):
@@ -171,7 +192,6 @@ class HttpFile(_BaseHttpServer):
                     return
                 except Exception as e:
                     debug_log(f"读取文件失败: {filename}, error={e}", "HttpFile.do_GET")
-                    print(f"[!] Error serving file {filename}: {e}")
                     self.send_error(500, "Internal Server Error")
                     return
 
@@ -188,9 +208,8 @@ class HttpFile(_BaseHttpServer):
 
         return FileDownloadHandler
 
-
 if __name__ == "__main__":
-    from base import run_cmd, set_debug
+    from base import set_debug
     from tool.bash_obf import demo
 
     #
