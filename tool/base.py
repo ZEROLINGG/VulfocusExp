@@ -56,7 +56,7 @@ def match_flag(text: str) -> str | None:
         return None
     match = _FLAG_PATTERN.search(text)
     result = match.group(0) if match else None
-    debug_log(f"匹配结果: {result}", "match_flag")
+    # debug_log(f"匹配结果: {result}", "match_flag")
     return result
 
 
@@ -354,7 +354,7 @@ def parse_ip_port(ip_port: str) -> TargetGroup:
     解析输入格式: "ip:port1,port2,..."
     返回: TargetGroup
     """
-    debug_log(f"解析输入: {ip_port}", "parse_ip_port")
+    # debug_log(f"解析输入: {ip_port}", "parse_ip_port")
     try:
         ip, ports_str = ip_port.strip().split(":", 1)
 
@@ -384,7 +384,7 @@ def process(
     targets: list[Any] = []
     try:
         if on_process:
-            debug_log("使用自定义 on_process", "process")
+            # debug_log("使用自定义 on_process", "process")
             targets = on_process(ip_port)
         else:
             tg = parse_ip_port(ip_port)

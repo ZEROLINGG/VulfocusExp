@@ -82,10 +82,10 @@ class RawResponse:
         返回格式：`name1=value1;name2=value2`
         若响应中不含 Set-Cookie 头且 old_cookie 为空则返回 None。
         """
-        debug_log(f"开始构建 Cookie，old_cookie: {old_cookie[:50] if old_cookie else 'None'}...",
-                  "RawResponse.build_cookie")
+        # debug_log(f"开始构建 Cookie，old_cookie: {old_cookie[:50] if old_cookie else 'None'}...",
+        #           "RawResponse.build_cookie")
         set_cookies: List[str] = self.headers().get("set-cookie", [])
-        debug_log(f"从响应获取到 {len(set_cookies)} 个 Set-Cookie 头", "RawResponse.build_cookie")
+        # debug_log(f"从响应获取到 {len(set_cookies)} 个 Set-Cookie 头", "RawResponse.build_cookie")
 
         # 解析 old_cookie 为有序字典
         merged: Dict[str, str] = {}
@@ -158,7 +158,7 @@ def _extract_host_and_port(raw: bytes) -> Optional[Tuple[str, Optional[int]]]:
             parts = host_value.rsplit(":", 1)
             try:
                 result = parts[0], int(parts[1])
-                debug_log(f"提取结果: host={result[0]}, port={result[1]}", "_extract_host_and_port")
+                # debug_log(f"提取结果: host={result[0]}, port={result[1]}", "_extract_host_and_port")
                 return result
             except (ValueError, IndexError):
                 pass
@@ -192,7 +192,7 @@ def _parse_headers(header_bytes: bytes) -> Tuple[Dict[str, List[str]], bytes]:
     else:
         header_part = header_bytes[:separator_index]
         body_part = header_bytes[separator_index + len(header_separator):]
-        debug_log(f"头部大小: {len(header_part)}, body 大小: {len(body_part)}", "_parse_headers")
+        # debug_log(f"头部大小: {len(header_part)}, body 大小: {len(body_part)}", "_parse_headers")
 
     lines = header_part.split(b"\r\n")
 
@@ -209,7 +209,7 @@ def _parse_headers(header_bytes: bytes) -> Tuple[Dict[str, List[str]], bytes]:
         else:
             headers[key] = [value]
 
-    debug_log(f"解析完成，共 {len(headers)} 个头字段", "_parse_headers")
+    # debug_log(f"解析完成，共 {len(headers)} 个头字段", "_parse_headers")
     return headers, body_part
 
 
@@ -354,7 +354,7 @@ def send_raw_request(
 
         try:
             sock = socket.create_connection((host, port), timeout=timeout)
-            debug_log(f"连接目标: {host}:{port} 成功", "send_raw_request")
+            # debug_log(f"连接目标: {host}:{port} 成功", "send_raw_request")
         except socket.timeout:
             debug_log(f"连接目标: {host}:{port} 超时", "send_raw_request")
             return RawResponse(
@@ -435,7 +435,7 @@ def send_raw_request(
                 )
 
         header_buf = bytes(header_buf)
-        debug_log(f"接收到响应头，大小: {len(header_buf)} 字节", "send_raw_request")
+        # debug_log(f"接收到响应头，大小: {len(header_buf)} 字节", "send_raw_request")
         body_start = b""
 
         if header_separator in header_buf:
@@ -454,7 +454,7 @@ def send_raw_request(
             try:
                 cl = int(content_length_str)
                 content_length = cl if cl >= 0 else None
-                debug_log(f"Content-Length: {content_length}", "send_raw_request")
+                # debug_log(f"Content-Length: {content_length}", "send_raw_request")
             except ValueError:
                 debug_log("Content-Length 解析失败", "send_raw_request")
                 content_length = None
@@ -464,7 +464,7 @@ def send_raw_request(
 
         if content_length is not None:
             body_length_to_read = content_length - len(body_start)
-            debug_log(f"根据 Content-Length 接收 body，还需接收: {body_length_to_read} 字节", "send_raw_request")
+            debug_log(f"根据 Content-Length({content_length}) 接收 body，还需接收: {body_length_to_read} 字节", "send_raw_request")
 
             while body_length_to_read > 0:
                 if total_received > max_response_size:
@@ -575,7 +575,7 @@ def send_raw_request(
         if conn:
             try:
                 conn.close()
-                debug_log("连接已关闭", "send_raw_request")
+                # debug_log("连接已关闭", "send_raw_request")
             except Exception:
                 pass
 
@@ -667,7 +667,7 @@ def repeater(
         host: Optional[str] = None,
         use_ssl: bool = False,
         verify_ssl: bool = False,
-        timeout: int = 8,
+        timeout: int = 4,
         max_response_size: int = 3 * 1024 * 1024,
         fix_content_length: bool = True,
         headers: Optional[Dict[str, Union[str, bytes]]] = None
