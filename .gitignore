@@ -10,3 +10,4 @@ wheels/
 .tmp/
 
 opencode.json
+.idea/
