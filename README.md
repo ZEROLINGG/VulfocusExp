@@ -495,11 +495,12 @@ TCP 反向/绑定 Shell 管理器，用于 RCE 场景下的命令交互：
 |-------------------------------------|------|
 | `connect(host, port)`               | 连接到目标 |
 | `disconnect()`                      | 断开连接 |
-| `wait_connected(timeout)`           | 等待连接建立 |
 | `is_connected()`                    | 检查连接状态 |
 | `interactive()`                     | 进入交互模式（标准输入/输出转发） |
 | `send(data)` / `sendline(data)`     | 同 TcpShellR |
 | `output(timeout, idle_ms, encoding)` | 同 TcpShellR |
+| `peek(encoding)`                    | 同 TcpShellR |
+
 
 #### Shell 命令生成
 

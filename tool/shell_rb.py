@@ -380,8 +380,6 @@ class TcpShellB(_TcpShellBase):
         with self._lock:
             return self._sock is not None and self._connected.is_set()
 
-    def wait_connected(self, timeout: float = 10.0) -> bool:
-        return self._connected.wait(timeout=timeout)
 
     def _get_active_socket(self) -> socket.socket | None:
         with self._lock:
