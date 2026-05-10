@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import os
 import re
+import signal
 import time
 from typing import Callable
 import subprocess
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable
-import os
 
 from tool.port_scan import Service
 from tool.local_ip import get_ip
-from tool.log import debug_log,set_debug as _set_debug,set_no_debug as _set_no_debug
+from tool.log import debug_log, set_debug as _set_debug, set_no_debug as _set_no_debug
 
 _FLAG_PATTERN = re.compile(r"flag-?\{[a-zA-Z0-9_-]+}", re.IGNORECASE)
 
@@ -30,7 +31,7 @@ def wait(
     interval: float = 0.3,
 ) -> bool:
     if timeout < 0:
-        debug_log("timeout 必须 >= 0","wait")
+        debug_log("timeout 必须 >= 0", "wait")
         return False
     if interval <= 0:
         debug_log("interval 必须 > 0", "wait")
@@ -49,6 +50,7 @@ def wait(
         time.sleep(min(interval, remaining))
     return False
 
+
 def match_flag(text: str) -> str | None:
     debug_log(f"输入文本: {text[:100] if text else 'None'}...", "match_flag")
     if not text:
@@ -56,7 +58,6 @@ def match_flag(text: str) -> str | None:
         return None
     match = _FLAG_PATTERN.search(text)
     result = match.group(0) if match else None
-    # debug_log(f"匹配结果: {result}", "match_flag")
     return result
 
 
@@ -121,6 +122,10 @@ class RunCmd:
         with RunCmd("long_task") as cmd:
             cmd.run()
             result = cmd.join()
+
+    进程以独立 session 启动（start_new_session=True），stop()/join() 超时时
+    使用 os.killpg 杀掉整个进程组，确保 shell=True 下的子进程树（如 nc -e bash）
+    也能被完整清理。
     """
 
     def __init__(self, command: str, timeout: int = 300) -> None:
@@ -139,7 +144,6 @@ class RunCmd:
 
     def run(self) -> tuple[bool, str]:
         """启动命令（非阻塞）。返回 (是否成功启动, 消息)。"""
-        debug_log(f"尝试启动命令: {self.command}", "RunCmd.run")
         with self._lock:
             if self._process is not None:
                 debug_log("进程已在运行", "RunCmd.run")
@@ -151,8 +155,9 @@ class RunCmd:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    start_new_session=True,
                 )
-                assert (isinstance(self._process, subprocess.Popen))
+                assert isinstance(self._process, subprocess.Popen)
                 debug_log(f"命令启动成功，PID: {self._process.pid}", "RunCmd.run")
                 return True, f"[RunCmd] 命令已启动，PID: {self._process.pid}"
             except Exception as e:
@@ -195,36 +200,32 @@ class RunCmd:
                 output="",
                 error=f"[RunCmd] Exception: {e}",
             )
-        assert (isinstance(self._result, CommandResult))
+        assert isinstance(self._result, CommandResult)
         return self._result
 
     def stop(self) -> CommandResult:
         """
-        终止进程并返回已收集到的输出。
+        终止进程组并返回已收集到的输出。
 
         - 进程已自然结束 → 返回真实结果（含 returncode）
-        - 进程仍在运行  → SIGTERM，5 s 后仍存活则 SIGKILL
+        - 进程仍在运行  → SIGTERM 整个进程组，5 s 后仍存活则 SIGKILL
 
         可安全多次调用。
         """
         debug_log("stop() 开始终止进程", "RunCmd.stop")
         with self._lock:
             if self._process is None:
-                debug_log("进程未启动", "RunCmd.stop")
                 return CommandResult(ok=False, output="", error="[RunCmd] 进程未启动")
             if self._result is not None:
-                debug_log("返回已缓存的结果", "RunCmd.stop")
                 return self._result
             proc = self._process
 
             if proc.poll() is not None:
                 debug_log(f"进程已自然结束，returncode={proc.returncode}", "RunCmd.stop")
                 self._result = self._collect_finished(proc)
-                assert (isinstance(self._result, CommandResult))
+                assert isinstance(self._result, CommandResult)
                 return self._result
 
-        # 进程仍在运行，锁外执行 I/O
-        debug_log("进程仍在运行，开始终止", "RunCmd.stop")
         result = self._terminate_and_collect(proc)
         self._result = result
         return result
@@ -238,13 +239,31 @@ class RunCmd:
             self._result = None
 
     def __enter__(self) -> RunCmd:
-        debug_log("进入上下文管理器", "RunCmd.__enter__")
         return self
 
     def __exit__(self, *_: object) -> None:
         """离开 with 块时自动终止进程并释放管道资源。"""
-        debug_log("退出上下文管理器", "RunCmd.__exit__")
         self.stop()
+
+    # ------------------------------------------------------------------
+    # 内部工具
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pgid(proc: subprocess.Popen[str]) -> int | None:
+        """安全获取进程组 ID，进程已消失时返回 None。"""
+        try:
+            return os.getpgid(proc.pid)
+        except OSError:
+            return None
+
+    @staticmethod
+    def _killpg(pgid: int, sig: signal.Signals) -> None:
+        """向进程组发送信号，忽略 ESRCH（进程组已不存在）。"""
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            pass
 
     @staticmethod
     def _collect_finished(proc: subprocess.Popen[str]) -> CommandResult:
@@ -265,11 +284,19 @@ class RunCmd:
 
     @staticmethod
     def _terminate_and_collect(proc: subprocess.Popen[str]) -> CommandResult:
-        """发送 SIGTERM，超时后 SIGKILL，然后排空管道返回结果。"""
+        """
+        向整个进程组发送 SIGTERM，等待 5 s；
+        超时后发 SIGKILL 并排空管道。
+        """
         stdout_str = ""
         stderr_str = ""
         try:
-            proc.terminate()
+            pgid = RunCmd._pgid(proc)
+            if pgid is not None:
+                RunCmd._killpg(pgid, signal.SIGTERM)
+            else:
+                proc.terminate()
+
             try:
                 stdout, stderr = proc.communicate(timeout=5)
                 stdout_str = stdout.strip() if stdout else ""
@@ -290,12 +317,23 @@ class RunCmd:
 
     @staticmethod
     def _kill_and_drain(proc: subprocess.Popen[str]) -> None:
-        """SIGKILL 后排空管道，防止僵尸进程或管道缓冲区阻塞。"""
+        """
+        向整个进程组发送 SIGKILL，然后排空管道。
+        防止僵尸进程或管道缓冲区阻塞。
+        """
+        pgid = RunCmd._pgid(proc)
+        if pgid is not None:
+            RunCmd._killpg(pgid, signal.SIGKILL)
+        else:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         try:
-            proc.kill()
             proc.communicate()
-        except Exception as _:
+        except Exception:
             pass
+
 
 
 @dataclass
@@ -320,11 +358,8 @@ class TargetGroup:
         return urls
 
     def ip_port_with(
-            self, types: list[Service] | None = None
+        self, types: list[Service] | None = None
     ) -> list[tuple[str, int]]:
-        """
-        返回 (ip, port) 元组列表
-        """
         if types is None:
             types = [Service.HTTP, Service.HTTPS]
         assert types is not None
@@ -338,7 +373,6 @@ class TargetGroup:
         return result
 
     def ip_port(self) -> list[tuple[str, int]]:
-        """返回所有端口的 (ip, port) 元组列表，不做服务类型过滤。"""
         result = [(self.ip, p) for p in self.ports]
         return result
 
@@ -350,11 +384,6 @@ class TargetGroup:
 
 
 def parse_ip_port(ip_port: str) -> TargetGroup:
-    """
-    解析输入格式: "ip:port1,port2,..."
-    返回: TargetGroup
-    """
-    # debug_log(f"解析输入: {ip_port}", "parse_ip_port")
     try:
         ip, ports_str = ip_port.strip().split(":", 1)
 
@@ -377,14 +406,13 @@ def parse_ip_port(ip_port: str) -> TargetGroup:
 
 
 def process(
-        ip_port: str,
-        run: Callable[[Any], tuple[bool, str | list[str], str]],
-        on_process: Callable[[str], list[Any]] | None = None,
+    ip_port: str,
+    run: Callable[[Any], tuple[bool, str | list[str], str]],
+    on_process: Callable[[str], list[Any]] | None = None,
 ) -> None:
     targets: list[Any] = []
     try:
         if on_process:
-            # debug_log("使用自定义 on_process", "process")
             targets = on_process(ip_port)
         else:
             tg = parse_ip_port(ip_port)
@@ -412,9 +440,9 @@ def process(
 
 
 def process_with(
-        ip_port: str,
-        run: Callable[[tuple[str, int]], tuple[bool, str | list[str], str]],
-        types: list[Service] | None = None,
+    ip_port: str,
+    run: Callable[[tuple[str, int]], tuple[bool, str | list[str], str]],
+    types: list[Service] | None = None,
 ) -> None:
     debug_log(f"开始 process_with: {ip_port}, types={types if types is not None else "[Service.HTTP, Service.HTTPS]"}", "process_with")
 
@@ -427,7 +455,6 @@ def process_with(
     process(ip_port, run, on_process)
 
 
-# 使用示例
 if __name__ == "__main__":
     _ip_port = "192.168.192.148:63945,37151,16620"
     print(_ip_port)
