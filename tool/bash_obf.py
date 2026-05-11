@@ -455,6 +455,11 @@ def demo():
     for cmd in cmds:
         print(cmd)
         print(f"[random_obf]\n{random_obf(cmd)}")
+        obfs = ['base64', 'bash_c_ifs1', 'brace_list1']
+        print(
+            f"[apply_obfs({obfs})]\n"
+            f"{apply_obfs(cmd, obfs)}"
+        )
         obfs = ['base64', 'bash_c_ifs1']
         print(
             f"[apply_obfs({obfs})]\n"

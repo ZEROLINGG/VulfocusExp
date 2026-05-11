@@ -1,3 +1,7 @@
+"""
+直接复用struts2 代码执行 （CVE-2016-0785）.py
+"""
+
 from tool.base import match_flag, process_with
 from tool.http_repeater import repeater
 
