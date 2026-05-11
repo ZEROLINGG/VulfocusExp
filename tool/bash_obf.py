@@ -10,6 +10,38 @@ from tool.log import debug_log
 
 SHELLS = ["bash","sh"]
 
+
+def _brace_list1(cmd: str) -> str:
+    """
+    cat /etc/passwd
+    ->
+    {"cat","/etc/passwd"}
+
+    利用 Bash Brace Expansion + 逗号分隔
+    """
+    parts = cmd.split()
+    if not parts:
+        return cmd
+
+    # 将命令按空格拆分成多个参数
+    braced = '{' + ','.join(f'"{part}"' for part in parts) + '}'
+    return braced
+def _brace_list2(cmd: str) -> str:
+    """
+    cat /etc/passwd
+    ->
+    {'cat','/etc/passwd'}
+
+    利用 Bash Brace Expansion + 逗号分隔
+    """
+    parts = cmd.split()
+    if not parts:
+        return cmd
+
+    # 将命令按空格拆分成多个参数
+    braced = '{' + ','.join(f'\'{part}\'' for part in parts) + '}'
+    return braced
+
 def _path_slash(cmd: str) -> str:
     """
     使用 ${PATH:0:1} 替代 /
@@ -220,6 +252,14 @@ def _cmd_check(cmd: str, no: list[str | Pattern[str]]) -> bool:
 
 
 OBFUSCATIONS: dict[str, dict[str, Any]] = {
+    "brace_list1": {
+        "func": _brace_list1,
+        "no": ["\"", "'", "{", "}", ","],
+    },
+    "brace_list2": {
+        "func": _brace_list2,
+        "no": ["\"", "'", "{", "}", ","],
+    },
     "path_slash": {
         "func": _path_slash,
         "no": ["'"],  # 单引号下不会展开
