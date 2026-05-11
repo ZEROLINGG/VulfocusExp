@@ -1,4 +1,6 @@
-
+"""
+直接复用struts2-052 远程代码执行 （CVE-2017-9805）.py
+"""
 from tool.base import match_flag, process_with, get_local_ip,wait
 from tool.bash_obf import apply_obfs
 from tool.http_repeater import repeater
