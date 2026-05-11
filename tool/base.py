@@ -28,7 +28,7 @@ def set_no_debug():
 def wait(
     func: Callable[[], bool],
     timeout: float = 15,
-    interval: float = 0.3,
+    interval: float = 0.2,
 ) -> bool:
     if timeout < 0:
         debug_log("timeout 必须 >= 0", "wait")
@@ -52,7 +52,7 @@ def wait(
 
 
 def match_flag(text: str) -> str | None:
-    debug_log(f"输入文本: {text[:100] if text else 'None'}...", "match_flag")
+    debug_log(f"输入文本: {text[:256] if text else 'None'}...", "match_flag")
     if not text:
         debug_log("文本为空，返回 None", "match_flag")
         return None
@@ -62,7 +62,7 @@ def match_flag(text: str) -> str | None:
 
 
 def match_flags(text: str) -> list[str]:
-    debug_log(f"输入文本: {text[:100] if text else 'None'}...", "match_flags")
+    debug_log(f"输入文本: {text[:256] if text else 'None'}...", "match_flags")
     if not text:
         debug_log("文本为空，返回空列表", "match_flags")
         return []

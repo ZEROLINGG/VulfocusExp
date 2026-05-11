@@ -1,24 +1,38 @@
-import inspect
+import sys
 import os
 
+class Color:
+    RESET   = "\033[0m"
+    GREEN   = "\033[32m"
+    BLUE    = "\033[34m"
 
+__DEBUG: bool = False
 
-def set_debug():
+def set_debug() -> None:
+    global __DEBUG
     os.environ["EXP_DEBUG"] = "true"
+    __DEBUG = True
 
-def set_no_debug():
+def set_no_debug() -> None:
+    global __DEBUG
     os.environ["EXP_DEBUG"] = ""
-
+    __DEBUG = False
 
 def debug_log(msg: str, tag: str = "") -> None:
-    if os.environ.get("EXP_DEBUG", "").lower() in ("1", "true", "yes"):
-        caller_frame = inspect.stack()[1]
-        caller_file = caller_frame.filename
-        caller_func = caller_frame.function  # 自动获取调用者函数名
-        module_name = os.path.splitext(os.path.basename(caller_file))[0]
+    if not __DEBUG:
+        return
 
-        # tag 未传入时，自动用调用者函数名
-        resolved_tag = tag if tag else caller_func
+    frame    = sys._getframe(1)
+    module   = os.path.splitext(os.path.basename(frame.f_code.co_filename))[0]
+    func     = frame.f_code.co_name
+    locals_  = frame.f_locals
 
-        log = f"[{module_name}][{resolved_tag}] {msg}"
-        print(log)
+    if "self" in locals_:
+        caller = f"{locals_['self'].__class__.__name__}.{func}"
+    elif "cls" in locals_:
+        caller = f"{locals_['cls'].__name__}.{func}"
+    else:
+        caller = func
+
+    resolved_tag = tag or caller
+    print(f"{Color.GREEN}[{module}]{Color.BLUE}[{resolved_tag}]{Color.RESET} {msg}")
