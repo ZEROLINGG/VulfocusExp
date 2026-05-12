@@ -5,9 +5,10 @@ import zlib
 import brotli
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union, List
-import os
-
 from tool.log import debug_log
+import mimetypes
+import secrets
+from pathlib import Path
 
 
 @dataclass
@@ -705,6 +706,49 @@ def repeater(
         timeout=timeout,
         max_response_size=max_response_size,
     )
+
+
+
+
+
+def build_multipart_form(
+    filename: str,
+    file: Path | bytes,
+    field_name: str = "file",
+    content_type: str | None = None,
+) -> tuple[dict[str, str], bytes]:
+    boundary = "----WebKitFormBoundary" + secrets.token_hex(16)
+    if isinstance(file, Path):
+        data = file.read_bytes()
+        if content_type is None:
+            content_type = (
+                mimetypes.guess_type(file.name)[0]
+                or "application/octet-stream"
+            )
+    else:
+        data = file
+        if content_type is None:
+            content_type = "application/octet-stream"
+
+    header = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    lines: list[bytes] = [
+        f"--{boundary}\r\n".encode(),
+
+        (
+            f'Content-Disposition: form-data; '
+            f'name="{field_name}"; '
+            f'filename="{filename}"\r\n'
+        ).encode(),
+        f"Content-Type: {content_type}\r\n".encode(),
+        b"\r\n",
+        data,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    body = b"".join(lines)
+    return header, body
+
+
 
 
 if __name__ == "__main__":

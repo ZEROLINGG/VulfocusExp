@@ -10,4 +10,6 @@ dependencies = [
     "requests>=2.31.0",
     "playwright>=1.40.0",
     "redis>=5.0.0",
+    "brotlipy>=0.7.0",
+    "path>=17.1.1",
 ]
