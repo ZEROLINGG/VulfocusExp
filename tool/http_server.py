@@ -1,7 +1,7 @@
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import time
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,7 @@ class _BaseHttpServer:
         self.host = "0.0.0.0"
         self._port = port  # 请求端口，0 = 由 OS 自动分配
         self._bound_port: int | None = None  # start() 后的实际端口
-        self._server: HTTPServer[Any] | None = None
+        self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
 
     def port(self) -> int:
@@ -66,7 +66,8 @@ class _BaseHttpServer:
         self._bound_port = addr[1]
 
         thread = threading.Thread(
-            target=self._server.serve_forever, daemon=True, # type: ignore
+            target=self._server.serve_forever, # type: ignore
+            daemon=True,
             name=f"{self.__class__.__name__}-serve",
         )
         thread.start()
@@ -152,10 +153,7 @@ class HttpEcho(_BaseHttpServer):
 
     def echo(self) -> str:
         with self._lock:
-            return "\n\n".join(
-                f"[{i}] {req}"
-                for i, req in enumerate(self._requests)
-            )
+            return "\n\n".join(f"[{i}] {req}" for i, req in enumerate(self._requests))
 
 
 class HttpFile(_BaseHttpServer):
@@ -180,10 +178,16 @@ class HttpFile(_BaseHttpServer):
                 try:
                     if isinstance(file_data_or_path, bytes):
                         content = file_data_or_path
-                        debug_log(f"从内存读取文件: {filename}, size={len(content)}", "HttpFile.do_GET")
+                        debug_log(
+                            f"从内存读取文件: {filename}, size={len(content)}",
+                            "HttpFile.do_GET",
+                        )
                     elif isinstance(file_data_or_path, Path):
                         content = file_data_or_path.read_bytes()
-                        debug_log(f"从磁盘读取文件: {file_data_or_path}, size={len(content)}", "HttpFile.do_GET")
+                        debug_log(
+                            f"从磁盘读取文件: {file_data_or_path}, size={len(content)}",
+                            "HttpFile.do_GET",
+                        )
                     else:
                         raise TypeError("File data must be bytes or a Path.")
                 except FileNotFoundError:
@@ -197,7 +201,9 @@ class HttpFile(_BaseHttpServer):
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                self.send_header(
+                    "Content-Disposition", f'attachment; filename="{filename}"'
+                )
                 self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
                 self.wfile.write(content)
@@ -208,8 +214,10 @@ class HttpFile(_BaseHttpServer):
 
         return FileDownloadHandler
 
+
 if __name__ == "__main__":
     from base import set_debug
+
     from tool.bash_obf import demo
 
     #
@@ -221,9 +229,6 @@ if __name__ == "__main__":
     # with HttpFile({"abc.txt": b"HttpFile content"}):
     #     cr = run_cmd("curl http://0.0.0.0:8001/abc.txt -o /tmp/abc.txt;cat /tmp/abc.txt")
     #     print(f"[下载结果] {cr.output}")
-
-
-
 
     demo()
     set_debug()
